@@ -15,6 +15,8 @@ import * as path from "node:path";
 
 export type SessionLogEvent = "start" | "compact" | "stop";
 
+export type SessionLogHarness = "pi" | "claude-code";
+
 /** Kill a hook that hangs; the script's own work is a few git/file reads. */
 export const HOOK_TIMEOUT_MS = 10_000;
 
@@ -56,15 +58,30 @@ export async function runSessionLogHook(opts: {
 	startDir: string;
 	event: SessionLogEvent;
 	sessionId: string;
+	/** Recorded in the log frontmatter the start text asks the agent to write. */
+	harness: SessionLogHarness;
 	exec?: HookExec;
 	timeoutMs?: number;
 }): Promise<string> {
 	const script = findSessionLogScript(opts.startDir);
 	if (!script) return "";
+	// --cwd is the session's own directory, not the repo root the script is run
+	// from: the log records where the session ran (tfd's `workdir:`).
+	const sessionCwd = path.resolve(opts.startDir);
 	try {
 		const result = await (opts.exec ?? defaultExec)(
 			"python3",
-			[script, "hook", opts.event, "--session", opts.sessionId],
+			[
+				script,
+				"hook",
+				opts.event,
+				"--session",
+				opts.sessionId,
+				"--harness",
+				opts.harness,
+				"--cwd",
+				sessionCwd,
+			],
 			{ cwd: path.dirname(path.dirname(script)), timeout: opts.timeoutMs ?? HOOK_TIMEOUT_MS },
 		);
 		return result.code === 0 ? result.stdout.trimEnd() : "";

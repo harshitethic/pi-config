@@ -80,23 +80,23 @@ describe("findSessionLogScript", () => {
 
 describe("runSessionLogHook", () => {
 	it("runs the script from the repo root with the event and session id", async () => {
-		const text = await runSessionLogHook({ startDir: join(repo, "src"), event: "compact", sessionId: "sid-9" });
-		expect(text).toBe(`stub hook compact --session sid-9 cwd=${repo}`);
+		const text = await runSessionLogHook({ harness: "pi", startDir: join(repo, "src"), event: "compact", sessionId: "sid-9" });
+		expect(text).toBe(`stub hook compact --session sid-9 --harness pi --cwd ${join(repo, "src")} cwd=${repo}`);
 	}, 15_000);
 
 	it("is empty when the repo has no script", async () => {
-		expect(await runSessionLogHook({ startDir: bare, event: "start", sessionId: "sid-9" })).toBe("");
+		expect(await runSessionLogHook({ harness: "pi", startDir: bare, event: "start", sessionId: "sid-9" })).toBe("");
 	});
 
 	it("is empty when the script exits non-zero", async () => {
-		expect(await runSessionLogHook({ startDir: failing, event: "start", sessionId: "sid-9" })).toBe("");
+		expect(await runSessionLogHook({ harness: "pi", startDir: failing, event: "start", sessionId: "sid-9" })).toBe("");
 	}, 15_000);
 
 	it("is empty when the script exceeds the timeout", async () => {
 		process.env.SESSION_LOG_STUB_MODE = "sleep";
 		try {
 			const started = Date.now();
-			expect(await runSessionLogHook({ startDir: repo, event: "start", sessionId: "s", timeoutMs: 100 })).toBe("");
+			expect(await runSessionLogHook({ harness: "pi", startDir: repo, event: "start", sessionId: "s", timeoutMs: 100 })).toBe("");
 			expect(Date.now() - started).toBeLessThan(5_000);
 		} finally {
 			delete process.env.SESSION_LOG_STUB_MODE;
@@ -107,18 +107,31 @@ describe("runSessionLogHook", () => {
 		// The real `pi.exec` returns non-zero rather than throwing, so a script
 		// that prints then fails must not leak its partial output.
 		const exec = async () => ({ stdout: "partial junk", code: 1 });
-		expect(await runSessionLogHook({ startDir: repo, event: "stop", sessionId: "s", exec })).toBe("");
+		expect(await runSessionLogHook({ harness: "pi", startDir: repo, event: "stop", sessionId: "s", exec })).toBe("");
 	});
 
-	it("passes the repo root and the default timeout to exec", async () => {
+	it("passes the repo root, the session cwd, and the default timeout to exec", async () => {
 		let seen: { cwd?: string; timeout?: number } | undefined;
-		const exec = async (_cmd: string, _args: string[], options?: { cwd?: string; timeout?: number }) => {
+		let args: string[] = [];
+		const exec = async (_cmd: string, argv: string[], options?: { cwd?: string; timeout?: number }) => {
+			args = argv;
 			seen = options;
 			return { stdout: "", code: 0 };
 		};
-		await runSessionLogHook({ startDir: join(repo, "src"), event: "start", sessionId: "s", exec });
-		expect(seen?.cwd).toBe(repo);
+		await runSessionLogHook({ harness: "pi", startDir: join(repo, "src"), event: "start", sessionId: "s", exec });
+		expect(seen?.cwd).toBe(repo); // exec cwd: the script's repo root
+		expect(args.slice(-4)).toEqual(["--harness", "pi", "--cwd", join(repo, "src")]); // --cwd: the session's own dir
 		expect(seen?.timeout).toBe(HOOK_TIMEOUT_MS);
+	});
+
+	it("resolves the session cwd before passing it as --cwd", async () => {
+		let args: string[] = [];
+		const exec = async (_cmd: string, argv: string[]) => {
+			args = argv;
+			return { stdout: "", code: 0 };
+		};
+		await runSessionLogHook({ harness: "pi", startDir: `${repo}/src/..`, event: "start", sessionId: "s", exec });
+		expect(args.slice(-2)).toEqual(["--cwd", repo]);
 	});
 
 	it("trims trailing whitespace and keeps leading whitespace", async () => {
@@ -128,10 +141,10 @@ describe("runSessionLogHook", () => {
 			calls.push(args);
 			return { stdout: "  indented  \n\n", code: 0 };
 		};
-		expect(await runSessionLogHook({ startDir: repo, event: "start", sessionId: "s", exec })).toBe("  indented");
+		expect(await runSessionLogHook({ harness: "pi", startDir: repo, event: "start", sessionId: "s", exec })).toBe("  indented");
 		expect(calls[0][0]).toBe(script);
 		const empty = async () => ({ stdout: " \n", code: 0 });
-		expect(await runSessionLogHook({ startDir: repo, event: "start", sessionId: "s", exec: empty })).toBe("");
+		expect(await runSessionLogHook({ harness: "pi", startDir: repo, event: "start", sessionId: "s", exec: empty })).toBe("");
 	});
 });
 
@@ -147,6 +160,7 @@ interface Sent {
 async function loadPi(cwd = repo, opts: { execThrows?: boolean; execResult?: { stdout: string; code: number } } = {}) {
 	const handlers = new Map<string, (event: any, ctx: any) => Promise<any> | any>();
 	const sent: Sent[] = [];
+	const execCalls: string[][] = [];
 	const fakePi: any = {
 		on(event: string, handler: any) {
 			handlers.set(event, handler);
@@ -155,6 +169,7 @@ async function loadPi(cwd = repo, opts: { execThrows?: boolean; execResult?: { s
 			sent.push({ message, options });
 		},
 		async exec(command: string, args: string[], options?: any) {
+			execCalls.push(args);
 			if (opts.execThrows) throw new Error("exec unavailable");
 			if (opts.execResult) return opts.execResult;
 			const p = Bun.spawnSync([command, ...args], { cwd: options?.cwd, env: process.env });
@@ -162,7 +177,7 @@ async function loadPi(cwd = repo, opts: { execThrows?: boolean; execResult?: { s
 		},
 	};
 	loadExtension(fakePi);
-	return { handlers, sent, ctx: { cwd, sessionManager: { getSessionId: () => "sid-1" } } };
+	return { handlers, sent, execCalls, ctx: { cwd, sessionManager: { getSessionId: () => "sid-1" } } };
 }
 
 describe("pi extension wiring", () => {
@@ -172,12 +187,12 @@ describe("pi extension wiring", () => {
 		expect(sent).toHaveLength(1);
 		expect(sent[0].message.customType).toBe("session-log");
 		expect(sent[0].message.display).toBe(true);
-		expect(sent[0].message.content).toContain("stub hook start --session sid-1");
+		expect(sent[0].message.content).toContain(`stub hook start --session sid-1 --harness pi`);
 		expect(sent[0].options?.triggerTurn).toBe(false);
 
 		await handlers.get("session_compact")!({ type: "session_compact" }, ctx);
 		expect(sent).toHaveLength(2);
-		expect(sent[1].message.content).toContain("stub hook compact --session sid-1");
+		expect(sent[1].message.content).toContain(`stub hook compact --session sid-1 --harness pi`);
 		expect(sent[1].options?.triggerTurn).toBe(false);
 	}, 15_000);
 
@@ -185,7 +200,7 @@ describe("pi extension wiring", () => {
 		const { handlers, sent, ctx } = await loadPi();
 		await handlers.get("agent_settled")!({ type: "agent_settled" }, ctx);
 		expect(sent).toHaveLength(1);
-		expect(sent[0].message.content).toContain("stub hook stop --session sid-1");
+		expect(sent[0].message.content).toContain(`stub hook stop --session sid-1 --harness pi`);
 		expect(sent[0].options?.triggerTurn).toBe(true);
 
 		// Same episode: the nudge started a turn; settling again must not start another.
@@ -198,21 +213,23 @@ describe("pi extension wiring", () => {
 		expect(sent).toHaveLength(2);
 	}, 15_000);
 
-	it("clears the guard when the hook reports the log is current", async () => {
-		const { handlers, sent, ctx } = await loadPi();
+	it("does not re-check the hook once it has nudged, until the user prompts again", async () => {
+		const { handlers, sent, execCalls, ctx } = await loadPi();
 		await handlers.get("agent_settled")!({ type: "agent_settled" }, ctx);
 		expect(sent).toHaveLength(1);
-		await handlers.get("agent_settled")!({ type: "agent_settled" }, ctx);
-		expect(sent).toHaveLength(1);
+		expect(execCalls.length).toBe(1); // one settle, one hook run
+		const afterNudge = execCalls.length;
 
-		process.env.SESSION_LOG_STUB_MODE = "empty";
-		try {
-			await handlers.get("agent_settled")!({ type: "agent_settled" }, ctx); // clears the guard
-		} finally {
-			delete process.env.SESSION_LOG_STUB_MODE;
-		}
+		// Same episode: no hook run, no second turn.
+		await handlers.get("agent_settled")!({ type: "agent_settled" }, ctx);
+		expect(sent).toHaveLength(1);
+		expect(execCalls.length).toBe(afterNudge);
+
+		// A user prompt re-arms it, and the next settle checks once.
+		await handlers.get("before_agent_start")!({ type: "before_agent_start" }, ctx);
 		await handlers.get("agent_settled")!({ type: "agent_settled" }, ctx);
 		expect(sent).toHaveLength(2);
+		expect(execCalls.length).toBe(afterNudge + 1);
 	}, 15_000);
 
 	it("re-arms the settle nudge at session start", async () => {
@@ -294,11 +311,11 @@ describe("external.ts as Claude Code runs it", () => {
 		expect(start.code).toBe(0);
 		const startJson = JSON.parse(start.out);
 		expect(startJson.hookSpecificOutput.hookEventName).toBe("SessionStart");
-		expect(startJson.hookSpecificOutput.additionalContext).toContain("stub hook start --session sid-7");
+		expect(startJson.hookSpecificOutput.additionalContext).toContain(`stub hook start --session sid-7 --harness claude-code --cwd ${repo}`);
 
 		const compact = run(["hook", "session-start"], { session_id: "sid-7", cwd: repo, source: "compact" });
 		expect(JSON.parse(compact.out).hookSpecificOutput.additionalContext).toContain(
-			"stub hook compact --session sid-7",
+			`stub hook compact --session sid-7 --harness claude-code --cwd ${repo}`,
 		);
 	}, 15_000);
 
@@ -307,7 +324,18 @@ describe("external.ts as Claude Code runs it", () => {
 		expect(prompt.code).toBe(0);
 		const json = JSON.parse(prompt.out);
 		expect(json.hookSpecificOutput.hookEventName).toBe("UserPromptSubmit");
-		expect(json.hookSpecificOutput.additionalContext).toContain("stub hook stop --session sid-7");
+		expect(json.hookSpecificOutput.additionalContext).toContain(`stub hook stop --session sid-7 --harness claude-code --cwd ${repo}`);
+	}, 15_000);
+
+	it("prompt stays silent when the hook is clean", () => {
+		process.env.SESSION_LOG_STUB_MODE = "empty";
+		try {
+			const prompt = run(["hook", "prompt"], { session_id: "sid-7", cwd: repo });
+			expect(prompt.code).toBe(0);
+			expect(prompt.out).toBe("");
+		} finally {
+			delete process.env.SESSION_LOG_STUB_MODE;
+		}
 	}, 15_000);
 
 	it("prints nothing outside a repo with the script, and without a session id", () => {

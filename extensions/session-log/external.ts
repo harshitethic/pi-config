@@ -49,7 +49,7 @@ async function hook(event: string): Promise<void> {
 	if (!input.session_id) return;
 	const startDir = input.cwd ?? process.cwd();
 	const run = (kind: SessionLogEvent) =>
-		runSessionLogHook({ startDir, event: kind, sessionId: input.session_id as string });
+		runSessionLogHook({ startDir, event: kind, sessionId: input.session_id as string, harness: "claude-code" });
 
 	if (event === "session-start") {
 		const text = await run(input.source === "compact" ? "compact" : "start");

@@ -14,7 +14,7 @@ Code: `extensions/session-log/` — `lib.ts` (shared plumbing), `index.ts` (pi e
 
 ## Contract
 
-`python3 scripts/session_log.py hook <start|compact|stop> --session <id>` prints the text to inject (possibly empty) and always exits 0. The harness passes its own session id; the script matches it against each log's `agent-session:` frontmatter.
+`python3 scripts/session_log.py hook <start|compact|stop> --session <id> --harness <pi|claude-code> --cwd <session cwd>` prints the text to inject (possibly empty) and always exits 0. The harness passes its own session id, its name, and the session's working directory — the start text puts all three into the log frontmatter it asks the agent to write. The script matches the id against each log's `agent-session:` frontmatter.
 
 | moment | tfd event | text |
 |---|---|---|
@@ -22,13 +22,13 @@ Code: `extensions/session-log/` — `lib.ts` (shared plumbing), `index.ts` (pi e
 | after compaction | `compact` | the log's current state to re-read |
 | moving on with unrecorded changes | `stop` | changed decision/registry files no active log points at via `ref:` |
 
-Only repos carrying `scripts/session_log.py` participate: the helpers walk up from the session cwd, and an absent script, a missing interpreter, a timeout or a non-zero exit all read as "nothing to say". The script's stdout is injected verbatim (trailing whitespace trimmed) — no wrapper text, so the context cost is exactly the script's cost. The `stop` check matches changed decision/registry files against the `ref:` pointers in every active log, so edits another session has already recorded stay quiet.
+Only repos carrying `scripts/session_log.py` participate: the helpers walk up from the session cwd, and an absent script, a missing interpreter, a timeout or a non-zero exit all read as "nothing to say". The script's stdout is injected verbatim (trailing whitespace trimmed) — no wrapper text, so the context cost is exactly the script's cost. A hook runs the script from the repo root but passes `--cwd` as the session's own directory; the `stop` check matches changed decision/registry files against the `ref:` pointers in every active log, so edits another session has already recorded stay quiet.
 
 ## pi (`index.ts`)
 
 - `session_start` → `start`, injected as a custom message (`session-log`); it enters context immediately.
 - `session_compact` → `compact`, injected the same way: mid-run it queues ahead of the next LLM call, idle it simply sits in context after the compaction entry.
-- `agent_settled` → `stop`. A non-empty nudge starts one turn (`triggerTurn`), because pi would otherwise sit idle until the user typed. One nudge per episode: settling again with the same complaint does not start another turn. The guard clears when the hook reports the log is current or when the user prompts. An ignored nudge is not retried — enforcement is tfd's `docs_validate`, not this hook.
+- `agent_settled` → `stop`. A non-empty nudge starts one turn (`triggerTurn`), because pi would otherwise sit idle until the user typed. Once nudged, the session is quiet for the rest of the turn: further settles neither run the hook nor start another turn. The guard clears at the next user prompt or session start (pi emits `before_agent_start` only for user prompts, not for extension-triggered turns — the re-arm depends on that). An ignored nudge is not retried — enforcement is tfd's `docs_validate`, not this hook. In a one-shot `pi -p` session the harness disposes as soon as its run settles, so the nudge turn is best-effort there; the start and compact injections are unaffected.
 - Subagents (`PI_SUBAGENT_DEPTH` set) skip entirely: the top-level session owns the log, and its own check sees the same repo changes.
 
 ## Claude Code (`external.ts`)

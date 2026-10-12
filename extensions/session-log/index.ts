@@ -19,10 +19,9 @@ import { runSessionLogHook, type SessionLogEvent } from "./lib.ts";
 export default function (pi: ExtensionAPI) {
 	if (process.env.PI_SUBAGENT_DEPTH) return;
 
-	// One nudge per "hook says the log is behind" episode: a nudge starts a
-	// turn, and if the model does not act on it, settling again must not start
-	// another. Cleared when the hook reports the log is current, and at each
-	// user prompt (a fresh interaction gets a fresh nudge).
+	// One nudge per turn: a nudge starts a turn, and if the model does not act
+	// on it, settling again must not start another. Cleared at each user prompt
+	// or session start (a fresh interaction gets a fresh nudge).
 	let stopNudged = false;
 
 	const hookText = (ctx: ExtensionContext, event: SessionLogEvent): Promise<string> =>
@@ -30,6 +29,7 @@ export default function (pi: ExtensionAPI) {
 			startDir: ctx.cwd,
 			event,
 			sessionId: ctx.sessionManager.getSessionId(),
+			harness: "pi",
 			exec: (command, args, options) => pi.exec(command, args, options),
 		});
 
@@ -59,13 +59,14 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("agent_settled", async (_event, ctx) => {
+		// Check the guard before touching the hook or the session: once nudged,
+		// this turn must not run the hook again (the nudge itself starts a turn,
+		// and settling again must not start another), and in a one-shot session
+		// pi is already disposing, handing the next emission a stale ctx.
+		if (stopNudged) return;
 		try {
 			const text = await hookText(ctx, "stop");
-			if (!text) {
-				stopNudged = false;
-				return;
-			}
-			if (stopNudged) return;
+			if (!text) return;
 			stopNudged = true;
 			inject(text, true);
 		} catch {}
