@@ -10,6 +10,8 @@ feature: session-log
 
 Keeps a working session's log (`tfd`'s `docs/sessions/`) current without the owner asking. A repo that carries `scripts/session_log.py` gets one line of context at session start, its log's state after a compaction, and a nudge when it is about to move on with decision/registry changes the log does not record. Everywhere else the hooks are silent.
 
+The log is also the session's work list: `extensions/todo.ts` is retired (`decisions/todo/001`), and agents read their state back with `python3 scripts/session_log.py summary --session <id> --current` (current goal and its latest events) instead of keeping a parallel in-session list.
+
 Code: `extensions/session-log/` — `lib.ts` (shared plumbing), `index.ts` (pi extension), `external.ts` (Claude Code hook CLI, not a pi extension). Decision: `decisions/external-tools/004-session-log-hooks.md`. Script contract: `tfd/docs/sessions/README.md`.
 
 ## Contract

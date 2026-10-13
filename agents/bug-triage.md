@@ -113,8 +113,9 @@ an assumption their task depends on.
 
 ## Queue + context hygiene
 
-Track the open queue in a `todo` doc (`setDoc`, e.g.
-`docs/bug-triage-queue.md`): each bug → status
-(intake / repro / root-caused / filed / fixed), `.cases` path, issue #,
-caller. Checkpoint after each bug is filed or fixed — summary must
-resume cold.
+Track the open queue in a repo plan doc (e.g. `docs/bug-triage-queue.md`).
+When the repo has a session log (`scripts/session_log.py`), that log is the
+work list: query it with
+`python3 scripts/session_log.py summary --session <id> --current`. Each bug →
+status (intake / repro / root-caused / filed / fixed), `.cases` path, issue #,
+caller. Checkpoint after each bug is filed or fixed — summary must resume cold.

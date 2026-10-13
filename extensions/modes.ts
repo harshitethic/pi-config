@@ -143,12 +143,14 @@ Occasional investigation, thinking, or experimentation loops you do
 yourself burn context that won't matter once the task moves on.
 Manage it:
 
-- **Plans go in a todo doc, not in chat.** Use \`todo\` \`setDoc\`
-  (e.g. \`docs/TODO.md\`) and write the full plan there. Put tracking/plan
-  docs **in the repo** (e.g. under \`docs/\`), never in \`tmp/\` — \`tmp/\` is
-  scratch/build artifacts only.
-- **Keep the in-pi todo list accurate** — one-line summaries
-  referencing the doc, marked \`in_progress\` / \`done\` as work moves.
+- **Plans go in a plan doc, not in chat.** Write the full plan to a
+  repo doc (e.g. \`docs/TODO.md\`) and keep it current as work moves.
+  Put tracking/plan docs **in the repo** (e.g. under \`docs/\`), never in
+  \`tmp/\` — \`tmp/\` is scratch/build artifacts only.
+- **When the repo has a session log, it is the work list.** Read it back
+  with \`python3 scripts/session_log.py summary --session <id> --current\`
+  (the current goal and its latest events) instead of keeping a parallel
+  list.
 - **Checkpoint after every context-heavy loop or subtask lands.**
   Summary must be rich enough to resume from cold: what was decided,
   what's next, which files/identifiers matter next.`,

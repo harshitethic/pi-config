@@ -9,6 +9,42 @@ files unrelated work items all had to touch). Delta-based — no absolute
 thresholds. Each audit runs as `scout-code` over the delta since the previous
 entry; the ranked candidates feed the next chunk's sequence before feature work.
 
+## 2026-10-13 — chunk: todo extension retired (`126d9bf..` this landing)
+
+1 landing: the `todo` tool, widget and `/todos` command removed
+(`extensions/todo.ts` 530 lines, `tests/todo-injection.test.ts` 310,
+`tests/todo-render.test.ts` 108, `docs/todo-injection-fix.md` 96), and the
+instruction text that pointed agents at it now points at the session log's
+state query (`decisions/todo/001`).
+
+### Growth
+
+| file | now | base (`126d9bf`) | Δ |
+|---|---|---|---|
+| `extensions/todo.ts` | — | 530 | **−530** (removed) |
+| `tests/todo-injection.test.ts` | — | 310 | −310 (removed) |
+| `tests/todo-render.test.ts` | — | 108 | −108 (removed) |
+| `docs/todo-injection-fix.md` | — | 96 | −96 (removed) |
+| `extensions/modes.ts` | 256 | 254 | +2 |
+| `agents/bug-triage.md` | 121 | 120 | +1 |
+| `docs/design/session-log-hooks.md` | 58 | 56 | +2 |
+
+Net −1039 lines; no file grew beyond the instruction edits. `createPiStub`
+copies 7 → 6 (`tests/todo-injection.test.ts:47` gone); bare `typebox`
+importers 5 → 4 among top-level `extensions/*.ts` (7 → 6 across all extension
+dirs, so `tests/setup.sh`'s typebox link stays). The top-1 file `extensions/subagent-async/index.ts` (4258
+lines, 1082-line factory) is untouched this chunk.
+
+### Unification
+
+- **Landed — one work-list mechanism.** The in-session todo state (tool +
+  widget + `/todos`) was a parallel record of what the session log already
+  tracks; it is gone, and `summary --session <id> --current` is the single
+  state query. The deletion is negative growth by construction.
+- **Carried forward unchanged:** `createPiStub` extraction (now 6 copies),
+  the `test-workorder-policy.cjs` mirror fold, the `review_policy` single
+  resolver, the `model-tiers` `†` helper.
+
 ## 2026-10-08 — chunk: work-order grammar landing (`16eb6fe..` this landing)
 
 2 commits, 1 work item: the audit artifact itself (`71bd902`) plus the
