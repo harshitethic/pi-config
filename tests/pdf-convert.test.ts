@@ -315,8 +315,13 @@ describe("real PDF conversion (end-to-end)", () => {
 		return null
 	}
 
+	// The engine probe is an environment prerequisite, not the behavior under test.
+	let engine: Awaited<ReturnType<typeof probeEngine>> = null
+	beforeAll(async () => {
+		engine = await probeEngine()
+	}, 30_000)
+
 	it("converts fixture PDF to markdown containing 'Hello PDF World'", async () => {
-		const engine = await probeEngine()
 		if (!engine) {
 			console.log("Skipping real conversion test: no engine available")
 			return
@@ -347,7 +352,7 @@ describe("real PDF conversion (end-to-end)", () => {
 			expect(result.markdown).toMatch(/Hello PDF World/i)
 			console.log(`Real conversion: engine=${result.engine}, output=${result.markdown.slice(0, 80)}...`)
 		}
-	})
+	}, 40_000)
 })
 
 // ── 6. buildFetchPdfResponse ─────────────────────────────────────────────

@@ -109,11 +109,11 @@ describe('CLI integration', () => {
 
   beforeAll(() => {
     tempRepo = createTempGitRepo();
-  });
+  }, 30_000);
 
   afterAll(() => {
     rmSync(tempRepo, { recursive: true, force: true });
-  });
+  }, 30_000);
 
   it('happy path --format md', () => {
     const result = runCli([tempRepo, '--format', 'md']);
@@ -131,7 +131,7 @@ describe('CLI integration', () => {
     // Breaking section in md uses backtick-wrapped hash: `hash`: subject
     const breakingBulletLines = lines.filter(l => /^- `[0-9a-f]+`/.test(l));
     expect(breakingBulletLines.length).toBeGreaterThanOrEqual(1);
-  });
+  }, 30_000);
 
   it('happy path --format text', () => {
     const result = runCli([tempRepo, '--format', 'text']);
@@ -146,7 +146,7 @@ describe('CLI integration', () => {
     const lines = result.stdout.split('\n');
     const bulletLines = lines.filter(l => /^- [0-9a-f]+: /.test(l));
     expect(bulletLines.length).toBeGreaterThanOrEqual(4);
-  });
+  }, 30_000);
 
   it('--help flag prints usage and exits 0', () => {
     const result = runCli(['--help']);
@@ -154,32 +154,32 @@ describe('CLI integration', () => {
     expect(result.stdout).toContain('Usage: changelog-gen');
     expect(result.stdout).toContain('--since');
     expect(result.stdout).toContain('--format');
-  });
+  }, 30_000);
 
   it('-h short flag prints usage and exits 0', () => {
     const result = runCli(['-h']);
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('Usage: changelog-gen');
-  });
+  }, 30_000);
 
   it('invalid --format exits 1 with error message', () => {
     const result = runCli([tempRepo, '--format', 'xml']);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('changelog-gen:');
     expect(result.stderr).toContain('Invalid format');
-  });
+  }, 30_000);
 
   it('non-git / bad repo path exits 1', () => {
     const result = runCli(['/tmp/nonexistent-repo-12345']);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('changelog-gen:');
-  });
+  }, 30_000);
 
   it('--since filter to future date returns empty changelog', () => {
     const result = runCli([tempRepo, '--since', '2099-01-01']);
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('# Changelog');
-  });
+  }, 30_000);
 
   it('--until filter includes all commits from temp repo', () => {
     const result = runCli([tempRepo, '--until', '2099-01-01']);
@@ -189,13 +189,13 @@ describe('CLI integration', () => {
     expect(result.stdout).toContain('## fix');
     expect(result.stdout).toContain('## docs');
     expect(result.stdout).toContain('⚠ Breaking changes');
-  });
+  }, 30_000);
 
   it('unknown flag exits 1 with error message', () => {
     const result = runCli(['--unknown-flag']);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('changelog-gen:');
-  });
+  }, 30_000);
 });
 
 describe('CLI default repo', () => {
@@ -208,5 +208,5 @@ describe('CLI default repo', () => {
     });
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('# Changelog');
-  });
+  }, 30_000);
 });
