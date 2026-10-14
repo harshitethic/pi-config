@@ -20,11 +20,11 @@ Code: `extensions/session-log/` — `lib.ts` (shared plumbing), `index.ts` (pi e
 
 | moment | tfd event | text |
 |---|---|---|
-| session start | `start` | the session's log with its full `summary` (log errors included) and the other active logs; with no log, how to open one or `adopt` a dead session's log |
+| session start | `start` | the session's log with its full `summary` (log errors included), or how to open or `adopt` one; then a count of other active logs and of logs with no clear current version across clones, pointing at `project --text` |
 | after compaction | `compact` | the same text, prefixed with the script's "Context was compacted. Re-read your session log before continuing." |
 | moving on with unrecorded changes | `stop` | the log's append-only and other-clone errors first, then changed decision/registry files no active log points at via `ref:` (tfd `decisions/session-logs/004`) |
 
-Only repos carrying `scripts/session_log.py` participate: the helpers walk up from the session cwd, and an absent script, a missing interpreter, a timeout or a non-zero exit all read as "nothing to say". The script's stdout is injected verbatim (trailing whitespace trimmed) — no wrapper text, so the context cost is exactly the script's cost. A hook runs the script from the repo root but passes `--cwd` as the session's own directory; the `stop` check matches changed decision/registry files against the `ref:` pointers in every active log, so edits another session has already recorded stay quiet.
+Only repos carrying `scripts/session_log.py` participate: the helpers walk up from the session cwd, and an absent script, a missing interpreter, a timeout or a non-zero exit all read as "nothing to say". The start/compact text ends by pointing at `project --text`, the project view rendered for an agent: every session across clones with goal/area states and copy warnings, open registry rows, recent decisions. The script's stdout is injected verbatim (trailing whitespace trimmed) — no wrapper text, so the context cost is exactly the script's cost. A hook runs the script from the repo root but passes `--cwd` as the session's own directory; the `stop` check matches changed decision/registry files against the `ref:` pointers in every active log, so edits another session has already recorded stay quiet.
 
 ## pi (`index.ts`)
 
