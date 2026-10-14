@@ -10,7 +10,7 @@ feature: session-log
 
 Keeps a working session's log (`tfd`'s `docs/sessions/`) current without the owner asking. A repo that carries `scripts/session_log.py` gets its log's state at session start and again after a compaction, and a nudge when the log needs reconciling or it is about to move on with decision/registry changes the log does not record. Everywhere else the hooks are silent.
 
-The log is also the session's work list: `extensions/todo.ts` is retired (`decisions/todo/001`), and agents query it with `python3 scripts/session_log.py summary --session <id> [--current]` on demand (start and compact inject the full summary) instead of keeping a parallel in-session list.
+The log is also the session's work list: `extensions/todo.ts` is retired (`decisions/todo/001`). Agents append events with `python3 scripts/session_log.py append --session <id> '<event line>'` — aligned, `ref: HEAD` becomes the commit's sha, and a malformed line or a new `check` error writes nothing (tfd `decisions/session-logs/005`) — and read state back with `summary --session <id> [--current]`; start and compact inject the full summary.
 
 Code: `extensions/session-log/` — `lib.ts` (shared plumbing), `index.ts` (pi extension), `external.ts` (Claude Code hook CLI, not a pi extension). Decision: `decisions/external-tools/004-session-log-hooks.md`. Script contract: `tfd/docs/sessions/README.md`.
 
@@ -20,7 +20,7 @@ Code: `extensions/session-log/` — `lib.ts` (shared plumbing), `index.ts` (pi e
 
 | moment | tfd event | text |
 |---|---|---|
-| session start | `start` | the session's log with its full `summary` (log errors included), or how to open or `adopt` one; then a count of other active logs and of logs with no clear current version across clones, pointing at `project --text` |
+| session start | `start` | the session's log and how to append to it (the `append` command), with its full `summary` (log errors included), or how to open or `adopt` one; then a count of other active logs and of logs with no clear current version across clones, pointing at `project --text` |
 | after compaction | `compact` | the same text, prefixed with the script's "Context was compacted. Re-read your session log before continuing." |
 | moving on with unrecorded changes | `stop` | the log's append-only and other-clone errors first, then changed decision/registry files no active log points at via `ref:` (tfd `decisions/session-logs/004`) |
 
