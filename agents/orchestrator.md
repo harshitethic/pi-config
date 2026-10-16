@@ -226,6 +226,12 @@ Trust the implementer's own review — do not re-run `review-code` or
 `review-tests` yourself. Re-running doubles the cost. You gate; you
 don't duplicate.
 
+In a repo with `scripts/wo_record.py`, record the verdict: `python3
+scripts/wo_record.py append <WO-id> gate`, verdict text on stdin. Link
+each departure in the report's `deviations_from_spec` to its registry
+row with `append <WO-id> departure --id Dn --registry docs/reviews/<file>.md#<ID>`
+(empty stdin); it is ruled once that row is answered.
+
 **Gating a child orchestrator.** A child orchestrator gates its own
 implementers and reports their evidence. Verify it the same way —
 run `subagent_review_status` on the implementer session ids the child
@@ -240,6 +246,10 @@ When the gate passes, merge the implementer's branch into your
 worktree. Resolve any conflicts. The commit that lands on your branch
 is the chunk's deliverable. A child orchestrator's merged branch
 merges the same way.
+
+In a repo with `scripts/wo_record.py`, record the landing after the merge:
+`python3 scripts/wo_record.py append <WO-id> landed --commit <sha>`,
+with `<sha>` in HEAD's history.
 
 ### 6. Reconcile the roadmap doc — if you own it
 
