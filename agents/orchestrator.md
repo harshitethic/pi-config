@@ -194,8 +194,10 @@ the gate is yours.
 not the report's account of it, and compare what landed with its Task
 Summary, rejected alternatives and acceptance rows. A substituted
 mechanism, an acceptance row edited, demoted to `| nyi` or left unmet,
-or a missed numeric bound is an owner question: raise it with your
-dispatcher (or the project's question registry) and do not merge. A
+or a missed numeric bound is an owner question: register it in the
+project's question registry (pushed — a message to your dispatcher
+alone gets buried), tell your dispatcher, and do not merge until the
+owner rules. A
 gate verdict records what landed; it never supersedes the work order,
 rules on design, or sets precedent for later work orders.
 

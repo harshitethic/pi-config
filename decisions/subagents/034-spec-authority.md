@@ -67,3 +67,10 @@ the owner, never from an orchestrator's unsupervised reasoning. Pending as its o
 > orchestrator "you are the chunk's owner", and the reviewer bar allowed an "orchestrator or owner
 > ruling" (now: the orchestrator rules on scope or sequencing only). The WO-2026-209 implementer
 > took its own compaction summary's "decide mechanism (A) vs (B)" as its next instruction.
+
+> **Amended (2026-10-17, owner):** owner questions are *recorded*, not only relayed. A session
+> not talking to the owner registers each one in the project's question registry and pushes it;
+> the orchestrator's gate registers a work-order departure before telling its dispatcher, and
+> holds the merge until the owner rules. Why: WO-2026-195's replaced byte-identity criterion was
+> a sound call the owner would have accepted, but it surfaced only inside a gate verdict and a
+> decision's Outcome section — a relayed message is buried by the recipient's later output.
