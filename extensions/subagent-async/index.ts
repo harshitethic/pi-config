@@ -6,7 +6,7 @@
  * at any time. Results are delivered as injected user messages.
  */
 
-import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { execFileSync, spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as net from "node:net";
@@ -746,6 +746,8 @@ interface RunningSubagent {
 	// Reviewer invocation guard: the parent agent's declared requirements.
 	// Empty / undefined means "no gate applies" (the soft-prompt check is a no-op).
 	reviewParentRequirements?: ReviewerKind[];
+	workRecord?: WorkRecord; // set when the spawn passed workOrderPath (decisions/work-order-records/001)
+	recordNotes?: string[]; // failed record writes, surfaced in status and the delivered result
 	// Worktree isolation
 	worktreePath: string | null;
 	isolationBranch: string | null;
@@ -1333,6 +1335,102 @@ function getFinalOutput(messages: any[]): string {
 	return "";
 }
 
+// ── Work-order records (decisions/work-order-records/001) ───────────────────
+// The spawner writes, into its own repo: the dispatch at spawn, then each
+// reviewer round and the completion when the implementer closes. The
+// implementer's worktree is never written — two writers would conflict at
+// merge. `scripts/wo_record.py` owns the format and the departure parsing.
+
+const WO_RECORD_SCRIPT = "scripts/wo_record.py";
+
+export interface WorkRecord {
+	cwd: string; // the spawner's repo root
+	woId: string; // WO-YYYY-NNN
+}
+
+function failureText(run: { error?: Error; stderr: string; status: number | null }): string {
+	return run.error?.message || run.stderr.trim() || `exit ${run.status}`;
+}
+
+function woRecordAppend(cwd: string, args: string[], body: string): string | null {
+	const run = spawnSync("python3", [path.join(cwd, WO_RECORD_SCRIPT), "append", ...args], {
+		cwd, input: body, encoding: "utf8",
+	});
+	return run.status === 0 && !run.error ? null : failureText(run);
+}
+
+/** A reviewer's task and final output, from its pi session file (JSONL, one entry per line).
+ *  A malformed line throws: a record must not quietly lose part of a session. */
+export function readSessionExchange(sessionFile: string): { task: string; output: string } | null {
+	const messages: any[] = [];
+	for (const line of fs.readFileSync(sessionFile, "utf-8").split("\n")) {
+		if (line.trim()) {
+			const entry = JSON.parse(line);
+			if (entry.type === "message") messages.push(entry.message);
+		}
+	}
+	const first = messages.find((m) => m?.role === "user");
+	if (!first) return null;
+	const task = typeof first.content === "string"
+		? first.content
+		: first.content.filter((p: any) => p.type === "text").map((p: any) => p.text).join("\n");
+	return { task, output: getFinalOutput(messages) };
+}
+
+/** Open a work-order record for a spawn by writing its dispatch. Returns the record to complete at
+ *  close, plus notes to surface. Never throws; a repo without wo_record.py gets neither record nor note. */
+export function openWorkRecord(
+	cwd: string,
+	workOrderPath: string,
+	implementerId: string,
+	task: string,
+): { record?: WorkRecord; notes: string[] } {
+	if (!fs.existsSync(path.join(cwd, WO_RECORD_SCRIPT))) return { notes: [] };
+	const fail = (why: string) => ({ notes: [`work-order record not written: ${why}`] });
+	try {
+		const woId = path.basename(workOrderPath).match(/^WO-\d{4}-\d{3}/)?.[0];
+		if (!woId) return fail(`${workOrderPath} has no WO-YYYY-NNN prefix`);
+		const blob = spawnSync("git", ["hash-object", "--", workOrderPath], { cwd, encoding: "utf8" });
+		if (blob.status !== 0 || blob.error) return fail(`git hash-object ${workOrderPath}: ${failureText(blob)}`);
+		const err = woRecordAppend(cwd, [
+			woId, "dispatch", "--wo_blob", blob.stdout.trim(), "--implementer", implementerId, "--work_order", workOrderPath,
+		], task);
+		return err ? fail(err) : { record: { cwd, woId }, notes: [] };
+	} catch (e) {
+		return fail(e instanceof Error ? e.message : String(e));
+	}
+}
+
+/** Write each reviewer round, then the completion, of a finished implementer. `implementerKey` is its
+ *  pi session id, the key its reviewers were registered under. Returns notes for the writes that failed. */
+export function completeWorkRecord(record: WorkRecord, implementerKey: string, finalText: string): string[] {
+	const notes: string[] = [];
+	const { cwd, woId } = record;
+	readPersistedSpawns(implementerKey).spawns.forEach((entry, i) => {
+		const round = i + 1;
+		const where = `review round ${round} (${entry.childSessionId})`;
+		try {
+			const sessionFile = readMetaJson(entry.childSessionId)?.sessionFile;
+			const exchange = sessionFile ? readSessionExchange(sessionFile) : null;
+			if (!exchange) {
+				notes.push(`work-order record: ${where} not written: no session file with a task`);
+				return;
+			}
+			const err = woRecordAppend(cwd, [
+				woId, "review", "--seat", entry.childAgentName, "--round", String(round), "--session", entry.childSessionId,
+			], JSON.stringify({ brief: exchange.task, output: exchange.output }));
+			if (err) notes.push(`work-order record: ${where} not written: ${err}`);
+		} catch (e) {
+			notes.push(`work-order record: ${where} not written: ${e instanceof Error ? e.message : String(e)}`);
+		}
+	});
+	const err = finalText.trim()
+		? woRecordAppend(cwd, [woId, "completion", "--implementer", implementerKey], finalText)
+		: "implementer has no final report";
+	if (err) notes.push(`work-order record: completion not written: ${err}`);
+	return notes;
+}
+
 function extractFilesFromArgs(toolName: string, args: Record<string, any>): { read?: string; write?: string } {
 	const result: { read?: string; write?: string } = {};
 	const filePath = args.file_path || args.path;
@@ -1378,6 +1476,7 @@ function formatProgress(rs: RunningSubagent): string {
 		p.filesRead.size > 0 ? `Files read: ${p.filesRead.size}` : null,
 		p.filesModified.size > 0 ? `Files modified: ${p.filesModified.size}` : null,
 		p.errors.length > 0 ? `Errors: ${p.errors.length}` : null,
+		rs.recordNotes?.length ? `Work-order record: ${rs.recordNotes.join("; ")}` : null,
 	]
 		.filter(Boolean)
 		.join(" | ");
@@ -2356,7 +2455,12 @@ async function spawnSubagent(
 		// DELIVER: the result reaches the parent now.
 		// No double delivery: resolveOnStop and deliverResult are mutually
 		// exclusive — see deliverCloseResult (the single delivery owner).
-		const deliveryPath = deliverCloseResult(pi, rs, code ?? 0, commitNote);
+		// Work-order record: the completion and each reviewer round (decisions/work-order-records/001).
+		const recordNotes = rs.workRecord
+			? completeWorkRecord(rs.workRecord, rs.piSessionId ?? sessionId, getFinalOutput(rs.messages))
+			: [];
+		rs.recordNotes = [...(rs.recordNotes ?? []), ...recordNotes];
+		const deliveryPath = deliverCloseResult(pi, rs, code ?? 0, commitNote + recordNotes.map((n) => `\n${n}`).join(""));
 		if (PI_ASYNC_DEBUG) debugLog(`deliverResult (${deliveryPath}): ${Date.now() - tDeliver}ms`);
 
 		// POST-DELIVERY: worktree removal and branch cleanup. Fire-and-forget —
@@ -3601,6 +3705,14 @@ export default function (pi: ExtensionAPI) {
 
 			running.set(sessionId, rs);
 
+			// Work-order record: the dispatch is written by this spawner, into its own repo.
+			// A failure is reported with the result; it never fails the spawn.
+			const dispatch = params.workOrderPath
+				? openWorkRecord(cwd, params.workOrderPath, sessionId, params.task)
+				: { notes: [] };
+			rs.workRecord = dispatch.record;
+			rs.recordNotes = dispatch.notes;
+
 		// Write metadata for recovery on session reload. Includes the full
 		// agent config so subagent_resume can reproduce the original
 		// configuration faithfully (storing the resolved model and system
@@ -3660,6 +3772,7 @@ export default function (pi: ExtensionAPI) {
 						text: [
 							`Subagent started: ${agent.name} (session: ${sessionId})${isolationStatus}`,
 							`Task: ${params.task.slice(0, 200)}${params.task.length > 200 ? "..." : ""}`,
+							...dispatch.notes,
 							"",
 							"The session id is the subagent's real pi session id — search it in /resume",
 							"or join it from a terminal with `pi --session <id>`.",
