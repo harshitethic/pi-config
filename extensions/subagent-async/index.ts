@@ -400,6 +400,8 @@ export interface SpawnMetaFields {
 	systemPrompt?: string;
 	allowedSubagents: string[];
 	excludeTools: string[];
+	/** Set when the spawn opened a work-order record; resume and recovery complete it. */
+	workRecord?: WorkRecord;
 }
 
 /**
@@ -1401,34 +1403,65 @@ export function openWorkRecord(
 	}
 }
 
-/** Write each reviewer round, then the completion, of a finished implementer. `implementerKey` is its
- *  pi session id, the key its reviewers were registered under. Returns notes for the writes that failed. */
-export function completeWorkRecord(record: WorkRecord, implementerKey: string, finalText: string): string[] {
-	const notes: string[] = [];
-	const { cwd, woId } = record;
-	readPersistedSpawns(implementerKey).spawns.forEach((entry, i) => {
-		const round = i + 1;
-		const where = `review round ${round} (${entry.childSessionId})`;
-		try {
-			const sessionFile = readMetaJson(entry.childSessionId)?.sessionFile;
-			const exchange = sessionFile ? readSessionExchange(sessionFile) : null;
-			if (!exchange) {
-				notes.push(`work-order record: ${where} not written: no session file with a task`);
-				return;
-			}
-			const err = woRecordAppend(cwd, [
-				woId, "review", "--seat", entry.childAgentName, "--round", String(round), "--session", entry.childSessionId,
-			], JSON.stringify({ brief: exchange.task, output: exchange.output }));
-			if (err) notes.push(`work-order record: ${where} not written: ${err}`);
-		} catch (e) {
-			notes.push(`work-order record: ${where} not written: ${e instanceof Error ? e.message : String(e)}`);
-		}
+/** The reviewer sessions a record already holds, and how many reviews. Read through the tool, not
+ *  by parsing its text. A failure is returned as text: the caller then writes nothing. */
+function recordedReviews(record: WorkRecord): { sessions: Set<string>; count: number } | string {
+	const run = spawnSync("python3", [path.join(record.cwd, WO_RECORD_SCRIPT), "summary", record.woId, "--json"], {
+		cwd: record.cwd, encoding: "utf8",
 	});
-	const err = finalText.trim()
-		? woRecordAppend(cwd, [woId, "completion", "--implementer", implementerKey], finalText)
-		: "implementer has no final report";
-	if (err) notes.push(`work-order record: completion not written: ${err}`);
-	return notes;
+	if (run.status !== 0 || run.error) return failureText(run);
+	const reviews = (JSON.parse(run.stdout).entries as { kind: string; keys: Record<string, string> }[])
+		.filter((e) => e.kind === "review");
+	return { sessions: new Set(reviews.map((e) => e.keys.session)), count: reviews.length };
+}
+
+/** The final text of a recovered run, from its session file (its messages never reached this process). */
+function sessionFinalText(sessionFile: string | undefined): string {
+	return sessionFile ? (readSessionExchange(sessionFile)?.output ?? "") : "";
+}
+
+/** Write the reviews not yet in the record, then a completion, for a finished implementer. Reviews
+ *  already recorded (by session id) are skipped, so a resumed or recovered run appends only what is
+ *  new. `implementerKey` is its pi session id, the key its reviewers were registered under; `readFinal`
+ *  yields its final report and runs inside the guard. Returns notes for the writes that failed. */
+export function completeWorkRecord(record: WorkRecord, implementerKey: string, readFinal: () => string): string[] {
+	const { cwd, woId } = record;
+	try {
+		const recorded = recordedReviews(record);
+		if (typeof recorded === "string") return [`work-order record: ${woId} not read, nothing written: ${recorded}`];
+		const notes: string[] = [];
+		let round = recorded.count;
+		for (const entry of readPersistedSpawns(implementerKey).spawns) {
+			if (recorded.sessions.has(entry.childSessionId)) continue;
+			const where = `review ${entry.childSessionId}`;
+			try {
+				const sessionFile = readMetaJson(entry.childSessionId)?.sessionFile;
+				const exchange = sessionFile ? readSessionExchange(sessionFile) : null;
+				if (!exchange) {
+					notes.push(`work-order record: ${where} not written: no session file with a task`);
+					continue;
+				}
+				const err = woRecordAppend(cwd, [
+					woId, "review", "--seat", entry.childAgentName, "--round", String(round + 1), "--session", entry.childSessionId,
+				], JSON.stringify({ brief: exchange.task, output: exchange.output }));
+				if (err) notes.push(`work-order record: ${where} not written: ${err}`);
+				else {
+					round += 1;
+					recorded.sessions.add(entry.childSessionId);
+				}
+			} catch (e) {
+				notes.push(`work-order record: ${where} not written: ${e instanceof Error ? e.message : String(e)}`);
+			}
+		}
+		const finalText = readFinal();
+		const err = finalText.trim()
+			? woRecordAppend(cwd, [woId, "completion", "--implementer", implementerKey], finalText)
+			: "implementer has no final report";
+		if (err) notes.push(`work-order record: completion not written: ${err}`);
+		return notes;
+	} catch (e) {
+		return [`work-order record: completion not written: ${e instanceof Error ? e.message : String(e)}`];
+	}
 }
 
 function extractFilesFromArgs(toolName: string, args: Record<string, any>): { read?: string; write?: string } {
@@ -2457,7 +2490,7 @@ async function spawnSubagent(
 		// exclusive — see deliverCloseResult (the single delivery owner).
 		// Work-order record: the completion and each reviewer round (decisions/work-order-records/001).
 		const recordNotes = rs.workRecord
-			? completeWorkRecord(rs.workRecord, rs.piSessionId ?? sessionId, getFinalOutput(rs.messages))
+			? completeWorkRecord(rs.workRecord, rs.piSessionId ?? sessionId, () => getFinalOutput(rs.messages))
 			: [];
 		rs.recordNotes = [...(rs.recordNotes ?? []), ...recordNotes];
 		const deliveryPath = deliverCloseResult(pi, rs, code ?? 0, commitNote + recordNotes.map((n) => `\n${n}`).join(""));
@@ -3205,6 +3238,7 @@ export function recoverOrphanedSubagents(
 				isolationBranch: meta.isolationBranch || null,
 				parentHeadCommit: meta.parentHeadCommit || null,
 				parentCwd: meta.parentCwd || ctx.cwd,
+				workRecord: meta.workRecord,
 				// Recovered (orphan-reattached) subagents don't carry the
 				// parent's tracker key from the metadata file. Use a stable
 				// pid fallback so re-attached sessions don't pollute the
@@ -3264,7 +3298,12 @@ export function recoverOrphanedSubagents(
 						finalOutput = log.split("── ").pop()?.trim() || finalOutput;
 					}
 				} catch {}
-				deliverResult(pi, rs, 0, `\n[Isolation] Recovered from previous session.`);
+				// The recovered child's messages never reached this process; its session file has them.
+				const recordNotes = rs.workRecord
+					? completeWorkRecord(rs.workRecord, meta.piSessionId ?? sid, () => sessionFinalText(meta.sessionFile))
+					: [];
+				rs.recordNotes = recordNotes;
+				deliverResult(pi, rs, 0, `\n[Isolation] Recovered from previous session.${recordNotes.map((n) => `\n${n}`).join("")}`);
 				running.delete(sid);
 				updateFooter();
 			});
@@ -3739,6 +3778,7 @@ export default function (pi: ExtensionAPI) {
 			systemPrompt: agent.systemPrompt,
 			allowedSubagents: agent.allowedSubagents ?? [],
 			excludeTools: agent.excludeTools ?? [],
+			workRecord: dispatch.record,
 		}));
 
 			// Reviewer-spawn tracker: if the spawned agent is a declared reviewer
@@ -4008,6 +4048,8 @@ export default function (pi: ExtensionAPI) {
 				cwd,
 				resolvedMeta.sessionFile, // resumeSessionFile
 			);
+			// The resumed run completes the same work-order record (decisions/work-order-records/001).
+			rs.workRecord = resolvedMeta.workRecord;
 
 			running.set(sid, rs);
 			updateFooter();

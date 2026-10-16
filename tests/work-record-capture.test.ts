@@ -12,28 +12,47 @@
 
 import { afterEach, describe, expect, it } from "bun:test";
 import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { EventEmitter } from "node:events";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import {
+import subagentFactory, {
 	completeWorkRecord,
+	metaPath,
 	openWorkRecord,
 	readSessionExchange,
+	recoverOrphanedSubagents,
+	resolveRunningSession,
+	writeMetaJson,
 } from "../extensions/subagent-async/index.ts";
 
-// Logs each call to calls.jsonl; exits 1 when fail-on names the call's kind (argv[3]).
+// Logs each append to calls.jsonl (ok: false when fail-on names its kind, argv[3]). `summary --json`
+// answers from the accepted reviews logged so far, as the real tool does, and is not logged itself.
 const STUB = `#!/usr/bin/env python3
 import json, os, sys
 root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-with open(os.path.join(root, "calls.jsonl"), "a") as f:
-    f.write(json.dumps({"argv": sys.argv[1:], "body": sys.stdin.read()}) + "\\n")
+log = os.path.join(root, "calls.jsonl")
+if sys.argv[1] == "summary":
+    entries = []
+    if os.path.exists(log):
+        for line in open(log):
+            c = json.loads(line)
+            if c["ok"] and c["argv"][2] == "review":
+                entries.append({"kind": "review", "keys": {"session": c["argv"][c["argv"].index("--session") + 1]}})
+    print(json.dumps({"status": "open", "entries": entries}))
+    sys.exit(0)
 fail = os.path.join(root, "fail-on")
-if os.path.exists(fail) and open(fail).read().strip() == sys.argv[3]:
+refused = os.path.exists(fail) and open(fail).read().strip() == sys.argv[3]
+with open(log, "a") as f:
+    f.write(json.dumps({"argv": sys.argv[1:], "body": sys.stdin.read(), "ok": not refused}) + "\\n")
+if refused:
     print("stub refused " + sys.argv[3], file=sys.stderr)
     sys.exit(1)
 `;
 
 const WO_FILE = "work-orders/WO-2026-001-demo.md";
+const WO_ID = "WO-2026-001";
 const tmpDirs: string[] = [];
 const tmpFiles: string[] = [];
 
@@ -58,7 +77,10 @@ function makeRepo({ script = true } = {}): string {
 function calls(root: string): { argv: string[]; body: string }[] {
 	const file = path.join(root, "calls.jsonl");
 	if (!fs.existsSync(file)) return [];
-	return fs.readFileSync(file, "utf-8").trim().split("\n").map((l) => JSON.parse(l));
+	return fs.readFileSync(file, "utf-8").trim().split("\n").map((l) => {
+		const { argv, body } = JSON.parse(l);
+		return { argv, body };
+	});
 }
 
 function blobOf(root: string, rel: string): string {
@@ -146,7 +168,7 @@ describe("completeWorkRecord — reviewer rounds, then completion", () => {
 		registerReviewer(key, "subagent-code-1", "review-code", code);
 		registerReviewer(key, "subagent-tests-1", "review-tests", tests);
 
-		const notes = completeWorkRecord({ cwd: root, woId: "WO-2026-001" }, key, "Done.\n**deviations_from_spec:** none");
+		const notes = completeWorkRecord({ cwd: root, woId: "WO-2026-001" }, key, () => "Done.\n**deviations_from_spec:** none");
 		expect(notes).toEqual([]);
 		const [r1, r2, done] = calls(root);
 		expect(r1.argv).toEqual(["append", "WO-2026-001", "review", "--seat", "review-code", "--round", "1",
@@ -165,8 +187,8 @@ describe("completeWorkRecord — reviewer rounds, then completion", () => {
 		const code = sessionFile(root, [message("u1", { role: "user", content: "Review." }),
 			message("a1", { role: "assistant", content: [{ type: "text", text: "OK" }] })]);
 		registerReviewer(key, "subagent-code-2", "review-code", code);
-		const notes = completeWorkRecord({ cwd: root, woId: "WO-2026-001" }, key, "Done.");
-		expect(notes).toEqual(["work-order record: review round 1 (subagent-code-2) not written: stub refused review"]);
+		const notes = completeWorkRecord({ cwd: root, woId: "WO-2026-001" }, key, () => "Done.");
+		expect(notes).toEqual(["work-order record: review subagent-code-2 not written: stub refused review"]);
 		expect(calls(root).map((c) => c.argv[2])).toEqual(["review", "completion"]);
 	});
 
@@ -174,14 +196,14 @@ describe("completeWorkRecord — reviewer rounds, then completion", () => {
 		const root = makeRepo();
 		const key = uniqueKey("impl");
 		registerReviewer(key, "subagent-code-3", "review-code");
-		const notes = completeWorkRecord({ cwd: root, woId: "WO-2026-001" }, key, "Done.");
-		expect(notes).toEqual(["work-order record: review round 1 (subagent-code-3) not written: no session file with a task"]);
+		const notes = completeWorkRecord({ cwd: root, woId: "WO-2026-001" }, key, () => "Done.");
+		expect(notes).toEqual(["work-order record: review subagent-code-3 not written: no session file with a task"]);
 		expect(calls(root).map((c) => c.argv[2])).toEqual(["completion"]);
 	});
 
 	it("reports a missing final report and writes no completion", () => {
 		const root = makeRepo();
-		const notes = completeWorkRecord({ cwd: root, woId: "WO-2026-001" }, uniqueKey("impl"), "  \n");
+		const notes = completeWorkRecord({ cwd: root, woId: "WO-2026-001" }, uniqueKey("impl"), () => "  \n");
 		expect(notes).toEqual(["work-order record: completion not written: implementer has no final report"]);
 		expect(calls(root)).toEqual([]);
 	});
@@ -209,5 +231,171 @@ describe("readSessionExchange", () => {
 		const file = path.join(root, "bad.jsonl");
 		fs.writeFileSync(file, JSON.stringify(message("u", { role: "user", content: "x" })) + "\n{\"type\":");
 		expect(() => readSessionExchange(file)).toThrow();
+	});
+});
+
+// ── Resume, recovery and the execute branch ─────────────────────────────────
+
+function stubPi() {
+	const tools = new Map<string, any>();
+	const pi: any = {
+		events: { emit: () => {} },
+		registerTool: (def: any) => tools.set(def.name, def),
+		registerCommand: () => {},
+		on: () => {},
+		sendUserMessage: () => {},
+		ui: { setStatus: () => {}, notify: () => {}, setWidget: () => {} },
+	};
+	return { pi, tools };
+}
+
+const stubCtx = (cwd: string) => ({
+	cwd,
+	ui: { setStatus: () => {}, notify: () => {}, setWidget: () => {}, clearStatus: () => {} },
+	getModel: () => undefined,
+	sessionManager: { getBranch: () => [], getEntries: () => [] },
+});
+
+/** A reviewer session file (JSONL) with one task and one final text. */
+function reviewSession(file: string, task: string, output: string): string {
+	fs.writeFileSync(file, [
+		JSON.stringify(message("u", { role: "user", content: task })),
+		JSON.stringify(message("a", { role: "assistant", content: [{ type: "text", text: output }] })),
+	].join("\n") + "\n");
+	return file;
+}
+
+describe("a second completion appends only the reviews the record does not hold", () => {
+	it("writes the new reviewer with the next round, then the completion", () => {
+		const root = makeRepo();
+		const key = uniqueKey("impl");
+		const record = { cwd: root, woId: WO_ID };
+		registerReviewer(key, "subagent-rev-a", "review-code", reviewSession(path.join(root, "a.jsonl"), "Review A.", "APPROVED"));
+		expect(completeWorkRecord(record, key, () => "First report.")).toEqual([]);
+		const before = calls(root).length;
+
+		registerReviewer(key, "subagent-rev-b", "review-tests", reviewSession(path.join(root, "b.jsonl"), "Review B.", "REJECT"));
+		expect(completeWorkRecord(record, key, () => "Second report.")).toEqual([]);
+
+		const later = calls(root).slice(before);
+		expect(later.map((c) => c.argv[2])).toEqual(["review", "completion"]);
+		expect(later[0].argv).toEqual(["append", WO_ID, "review", "--seat", "review-tests", "--round", "2",
+			"--session", "subagent-rev-b"]);
+		expect(later[1].body).toBe("Second report.");
+	});
+});
+
+class FakeSock extends EventEmitter {
+	unref(): void {}
+}
+
+describe("recovery completes the record from the recovered session file", () => {
+	it("appends the reviews not yet recorded, then the completion", () => {
+		const root = makeRepo();
+		const piId = uniqueKey("impl");
+		const record = { cwd: root, woId: WO_ID };
+		// Run 1 completed before the reload.
+		registerReviewer(piId, "subagent-rec-a", "review-code", reviewSession(path.join(root, "a.jsonl"), "Review A.", "APPROVED"));
+		completeWorkRecord(record, piId, () => "First report.");
+		const before = calls(root).length;
+
+		// Run 2: its reviewer ran before the reload, then the child finished under a recovered handle.
+		registerReviewer(piId, "subagent-rec-b", "review-tests", reviewSession(path.join(root, "b.jsonl"), "Review B.", "REJECT"));
+		const sid = `subagent-${randomUUID()}`;
+		const runFile = reviewSession(path.join(root, "run2.jsonl"), "Rework.", "Reworked.\n\n**deviations_from_spec:**\n- Changed the approach.");
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wo-recover-"));
+		tmpDirs.push(dir);
+		fs.writeFileSync(path.join(dir, `pi-subagent-${sid}.sock`), "");
+		fs.writeFileSync(path.join(dir, `pi-subagent-${sid}.log`), "");
+		fs.writeFileSync(path.join(dir, `pi-subagent-${sid}.meta.json`), JSON.stringify({
+			agentName: "implement", task: "Rework.", cwd: root, startedAt: Date.now(), piSessionId: piId,
+			sessionFile: runFile, ownerPid: process.pid, workRecord: record,
+		}));
+
+		const { pi } = stubPi();
+		const sock = new FakeSock();
+		recoverOrphanedSubagents(pi, { cwd: root }, { dir, connect: () => sock as any, selfPid: process.pid });
+		sock.emit("connect");
+		sock.emit("close");
+
+		const after = calls(root).slice(before);
+		expect(after.map((c) => c.argv[2])).toEqual(["review", "completion"]);
+		expect(after[0].argv.slice(3, 9)).toEqual(["--seat", "review-tests", "--round", "2", "--session", "subagent-rec-b"]);
+		expect(after[1].body).toBe("Reworked.\n\n**deviations_from_spec:**\n- Changed the approach.");
+		expect(resolveRunningSession(sid)).toBeNull();
+	});
+});
+
+describe("resume carries the record context from the meta", () => {
+	it("sets the resumed run's record from the meta written at its original spawn", async () => {
+		const root = makeRepo();
+		const sid = `subagent-${randomUUID()}`;
+		const sessionFile = path.join(root, "resume.jsonl");
+		fs.writeFileSync(sessionFile, `{"type":"session","version":3,"id":"abc","cwd":${JSON.stringify(root)}}\n{"type":"model_change"}\n`);
+		writeMetaJson(sid, { sessionFile, agentName: "implement", workRecord: { cwd: root, woId: WO_ID } });
+		const { pi, tools } = stubPi();
+		subagentFactory(pi);
+		try {
+			const res = await tools.get("subagent_resume").execute("tc", { session_id: sid, task: "continue" },
+				undefined, undefined, stubCtx(root));
+			expect(res.isError).toBeFalsy();
+			expect(resolveRunningSession(sid)?.workRecord).toEqual({ cwd: root, woId: WO_ID });
+		} finally {
+			await tools.get("subagent_kill").execute("tk", { session_id: sid }, undefined, undefined, stubCtx(root));
+			removeArtifacts(sid);
+		}
+	});
+});
+
+/** Remove what a real spawn leaves for a handle: meta, log, socket, and its pi transcript. */
+function removeArtifacts(sid: string): void {
+	const files = [metaPath(sid), `/tmp/pi-subagent-${sid}.log`, `/tmp/pi-subagent-${sid}.sock`];
+	const sessionsRoot = path.join(os.homedir(), ".pi", "agent", "sessions");
+	try {
+		for (const dir of fs.readdirSync(sessionsRoot)) {
+			for (const entry of fs.readdirSync(path.join(sessionsRoot, dir))) {
+				if (entry.endsWith(`_${sid}.jsonl`)) files.push(path.join(sessionsRoot, dir, entry));
+			}
+		}
+	} catch {
+		// no transcripts directory
+	}
+	for (const f of files) fs.rmSync(f, { force: true });
+}
+
+describe("subagent execute opens the record only for a workOrderPath spawn", () => {
+	it("writes the dispatch and persists the record context; a plain spawn writes nothing", async () => {
+		const root = makeRepo();
+		const { pi, tools } = stubPi();
+		subagentFactory(pi);
+		const ctx = stubCtx(root);
+		const task = "Reply with the single word: ok";
+		const sids: string[] = [];
+		try {
+			const withOrder = await tools.get("subagent").execute("tc", {
+				agent: "implement", task, cwd: root, isolate: false, review_policy: "skip", workOrderPath: WO_FILE,
+			}, undefined, undefined, ctx);
+			const sid = /session: (subagent-[0-9a-f-]+)/.exec(withOrder.content[0].text)![1];
+			sids.push(sid);
+			expect(calls(root)).toEqual([{
+				argv: ["append", WO_ID, "dispatch", "--wo_blob", blobOf(root, WO_FILE), "--implementer", sid,
+					"--work_order", WO_FILE],
+				body: task,
+			}]);
+			expect(JSON.parse(fs.readFileSync(metaPath(sid), "utf-8")).workRecord).toEqual({ cwd: root, woId: WO_ID });
+
+			const plain = await tools.get("subagent").execute("tc", {
+				agent: "implement", task, cwd: root, isolate: false, review_policy: "skip",
+			}, undefined, undefined, ctx);
+			const plainSid = /session: (subagent-[0-9a-f-]+)/.exec(plain.content[0].text)![1];
+			sids.push(plainSid);
+			expect(calls(root)).toHaveLength(1);
+			expect(JSON.parse(fs.readFileSync(metaPath(plainSid), "utf-8")).workRecord).toBeUndefined();
+		} finally {
+			for (const sid of sids) {
+				await tools.get("subagent_kill").execute("tk", { session_id: sid }, undefined, undefined, ctx);
+				removeArtifacts(sid);
+			}
+		}
 	});
 });
