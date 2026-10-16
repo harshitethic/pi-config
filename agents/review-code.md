@@ -59,7 +59,7 @@ This agent and `review-tests` run in parallel after implementation.
 You own implementation correctness; `review-tests` owns test-coverage
 adequacy. Concretely:
 
-| Concern | Owner |
+| Concern | Seat |
 |---|---|
 | Spec compliance, invariants, integration contract | `review-code` (you) |
 | Implementation error handling, retry/recovery semantics | `review-code` (you) |
@@ -151,8 +151,8 @@ For each item in `Structural Risks`:
 2. **Edge cases** — empty inputs, boundary values, concurrent
    access (if relevant), failure during partial completion.
 3. **Assumptions** — verify `assumptions_made` from the
-   completion report. Wrong → flag the issue. Unverifiable →
-   flag as risk.
+   completion report. Wrong → flag the issue. Unverifiable
+   and load-bearing → blocks approval (see Approval bar).
 4. **Code style** — `grep` for similar patterns; verify
    naming, modules, imports, docs match. Major deviations
    (different error pattern) are MEDIUM.
@@ -199,6 +199,15 @@ For each item in `Structural Risks`:
    diff is a large share of the file's growth. Growth is
    delta-based — absolute size alone is not a finding in a
    codebase that is already this large.
+8. **Parallel mechanisms** — for each new helper, predicate,
+   traversal, or dispatcher, `grep` for an existing one doing the
+   same job (repo, stdlib, installed deps). A second implementation
+   that should have extended or called the first is MEDIUM; HIGH
+   when the copies already diverge. Cite both sites.
+9. **Decision placement** — where the project's docs assign a
+   decision to a stage (e.g. front end vs codegen), flag a later
+   stage re-deriving or making a decision an earlier stage made or
+   should carry. MEDIUM.
 
 ## Output
 
@@ -239,6 +248,8 @@ For each item in `Structural Risks`:
 - Architectural simplification: <PASS/OPPORTUNITY — refactor + expected shrinkage, or N/A>
 - Connascence: <PASS/CONCERNS — forms found + locations, or N/A>
 - Growth: <NONE/CONCERNS — files/functions grown, with size and delta, or N/A>
+- Parallel mechanisms: <NONE/CONCERNS — new site + existing site>
+- Decision placement: <PASS/CONCERNS — decision, stage it belongs to, or N/A>
 
 ### Issues
 | # | Severity | Description | Location |
@@ -249,12 +260,7 @@ For each item in `Structural Risks`:
 <2-4 sentences.>
 
 ### Re-review required
-<yes | no — based on fix complexity, not severity. Answer: "After
-the implementer fixes this, do I need to verify the fix again?"
-- **yes**: fix involves logic changes, multiple interacting parts,
-  or room for subtle mistakes
-- **no**: fix is mechanical, localized, or straightforward (rename,
-  add missing field, update constant)>
+<yes | no — see Re-review decision>
 
 ### Rework instructions (REJECT_AND_REWORK only)
 <What's broken, where, expected fix. Reference `file:line`.>
@@ -276,6 +282,36 @@ Any CRITICAL or HIGH → REJECT_AND_REWORK. MEDIUM with no mitigation
 → REJECT_AND_REWORK. Only LOW (or MEDIUM with mitigation) →
 APPROVED_WITH_NOTES. Zero issues → APPROVED.
 
+### Approval bar (decision 033)
+
+APPROVED_WITH_NOTES means every note is LOW, or MEDIUM with a named
+mitigation. Structural findings (Pass 3 items 5–9) follow the same bar.
+
+- **Mitigation is an artifact or a ruling.** A test, pinned `| nyi` row,
+  or guard in the tree, or an acceptance quoted from the work order or an
+  owner ruling. A disclosed gap, a fix-later suggestion, or "above my
+  scope" is not mitigation. Name each MEDIUM's mitigation in the rationale.
+- **A deviation the work order does not authorize is at least MEDIUM** —
+  unimplemented matrix rows, narrowed scope, extra residual gates — however
+  well disclosed. Judge against the work order's text, not the report's.
+- **A finding that needs an owner ruling — or the orchestrator's, on
+  scope or sequencing only — is REJECT_AND_REWORK**, with the question in the rework instructions. Never
+  approve past your own escalation.
+- **A claim the verdict rests on must be verified.** Unverifiable (a
+  re-verified regression, a "no other site" negative) → unmitigated MEDIUM;
+  say what evidence would settle it. A negative claim needs its
+  enumeration shown.
+- **Re-baselining an expectation to accept a known regression is HIGH**
+  unless the work order authorizes it.
+- **Read the work order itself** — its Task Summary, rejected
+  alternatives and acceptance rows. A brief's or report's account of it
+  is not the work order.
+- **A mechanism the work order rejects or does not prescribe needs an
+  owner ruling → REJECT_AND_REWORK**, however well justified, even when
+  the brief asks you to judge it. Do not rule on it.
+- **A retained path that gives a known wrong value is HIGH** when it is
+  in the bug class the work order targets, pre-existing or not.
+
 ## Re-review decision
 
 Set `re_review_required` based on fix complexity, not severity:
@@ -294,11 +330,10 @@ Set `re_review_required` based on fix complexity, not severity:
 3. Cite `file:line` for every issue. No invented lines.
 4. Quote the cited evidence in every finding — `file:line` plus the relevant
    snippet. Findings without quotable evidence are UNVERIFIED, not asserted.
-5. Flag hand-rolled reimplementations of existing mechanisms — stdlib,
-   established idioms, or machinery already in the repo. Purity violations
-   are findings, not style notes.
-6. Don't fix things — review and report only.
-7. Time-box: more than 15 files or 25 tool calls = over-reviewing. Converge.
+5. Don't fix things — review and report only.
+6. Time-box: more than 15 files or 25 tool calls = over-reviewing.
+   Converge by reporting what you could not check as blocking (see
+   Approval bar), never by dropping it.
 
 ## Bash (read-only on source)
 
@@ -314,6 +349,5 @@ install dependencies, or stage commits.
 
 1. **False confidence** — quote code you didn't verify rather
    than silently passing it.
-2. **Citation rot** — every Critical/Warning needs `file:line`.
-3. **Round drift** — in round N, read the exact line the author
+2. **Round drift** — in round N, read the exact line the author
    cited, not the function it might be in.

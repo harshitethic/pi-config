@@ -29,6 +29,8 @@ Signals, judged by the orchestrator (and user where wanted):
 
 Decision rule: **keep** if verdicts are clean and cost/wall-clock improve; **try one Pro round** if Flash is materially worse but the format is promising (same-lab, stronger — not a decorrelation fix); **revert the tier to DeepSeek** if fabrication, missed defects, or pushback rate regresses — noting that revert returns the config to same-lab review, the status quo 019 accepted for cost and 022 kept.
 
+**2026-10-16:** decision 033 tightened the review gate mid-experiment; verdicts after it are not comparable with the 2026-10-01..16 window. The WO-153/154 control replays use the pre-033 prompts.
+
 ## Risks / tradeoffs
 
 - **`review-code` is the highest-stakes seat and MiMo Flash is the series' weakest coding row** (BenchLM coding rank #38, 49.8 index; composite carried by agentic/knowledge rows). Main risk, accepted knowingly; revert on missed defects.

@@ -153,6 +153,12 @@ Each reviewer's task must include:
 (f) your assumptions, deviations from spec, and any issues
     encountered during implementation.
 
+Give the work order's path, and quote (a) as the work order says it —
+never your summary. List each deviation as a plain fact (what the order
+specified, what landed). Never ask a reviewer to judge whether a
+deviation is justified: that is an owner ruling (APPEND_SYSTEM § Spec
+authority), and a reviewer who finds one rejects it.
+
 #### Project-context digest
 
 Include a digest of the project conventions, invariants, and

@@ -80,3 +80,8 @@ the owner, never from an orchestrator's unsupervised reasoning. Pending as its o
 > "`tail_graph.rs` only" line was wrong because the fix's seat was an implicit ABI parameter. The
 > `work-order-template` gains *Premise* (stop on falsification) and *Rejected alternatives* (owner
 > rulings only, each cited; never the author's own reasoning) sections.
+
+> **Amended (2026-10-17, owner):** an implementer's reviewer brief gives the work order's path,
+> quotes the order rather than summarizing it, lists deviations as plain facts, and never asks a
+> reviewer to judge one — the WO-2026-209 implementer asked review-code to "judge whether the
+> deviation … is justified", and review-code ruled.
