@@ -6,7 +6,7 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { ack, countText, list, ownerAsks } from "./lib.ts";
+import { ack, attention, countText, list, ownerAsks } from "./lib.ts";
 
 const STATUS_KEY = "owner-asks";
 const REFRESH_MS = 60_000;
@@ -26,9 +26,8 @@ export default function (pi: ExtensionAPI) {
 				current.ui.setStatus(STATUS_KEY, undefined);
 				return;
 			}
-			const text = countText(state.asks);
-			const hasNew = state.asks.some((a) => a.isNew);
-			current.ui.setStatus(STATUS_KEY, hasNew ? current.ui.theme.fg("warning", text) : text);
+			const text = countText(state.asks, state.unruled.length);
+			current.ui.setStatus(STATUS_KEY, attention(state) ? current.ui.theme.fg("warning", text) : text);
 		} catch {
 			// The error text comes from /asks; the status bar only flags it.
 			current.ui.setStatus(STATUS_KEY, current.ui.theme.fg("error", "owner asks: error"));

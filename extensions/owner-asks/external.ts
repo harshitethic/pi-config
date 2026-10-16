@@ -11,7 +11,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { ack, countText, gitOut, list, ownerAsks } from "./lib.ts";
+import { ack, attention, countText, gitOut, list, ownerAsks } from "./lib.ts";
 
 const YELLOW = "\x1b[33m";
 const RESET = "\x1b[0m";
@@ -40,8 +40,8 @@ async function statusline(): Promise<void> {
 	if (branch) parts.push(branch);
 	if (asks === "error") parts.push("owner asks: error");
 	else if (asks) {
-		const text = countText(asks.asks);
-		parts.push(asks.asks.some((a) => a.isNew) ? `${YELLOW}${text}${RESET}` : text);
+		const text = countText(asks.asks, asks.unruled.length);
+		parts.push(attention(asks) ? `${YELLOW}${text}${RESET}` : text);
 	}
 	process.stdout.write(`${parts.join(" · ")}\n`);
 }

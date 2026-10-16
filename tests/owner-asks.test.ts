@@ -12,7 +12,7 @@ import { mkdtempSync, mkdirSync, readdirSync, realpathSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import loadExtension from "../extensions/owner-asks/index.ts";
-import { ack, countText, list, ownerAsks } from "../extensions/owner-asks/lib.ts";
+import { ack, attention, countText, list, ownerAsks } from "../extensions/owner-asks/lib.ts";
 
 const CLI = join(import.meta.dir, "..", "extensions", "owner-asks", "external.ts");
 
@@ -26,6 +26,20 @@ if ref:
     text = subprocess.run(["git", "show", f"{ref}:asks.txt"], capture_output=True, text=True, check=True).stdout
 else:
     text = open("asks.txt").read()
+sys.stdout.write(text)
+`;
+
+// Logs each call to record-runs.log (the subcommand and --ref), then prints unruled.txt (read at --ref when given).
+const FAKE_RECORD_SCRIPT = `
+import subprocess, sys
+args = sys.argv[1:]
+ref = args[args.index("--ref") + 1] if "--ref" in args else None
+with open("record-runs.log", "a") as f:
+    f.write(f"{args[0]} {ref}\\n")
+if ref:
+    text = subprocess.run(["git", "show", f"{ref}:unruled.txt"], capture_output=True, text=True, check=True).stdout
+else:
+    text = open("unruled.txt").read()
 sys.stdout.write(text)
 `;
 
@@ -47,13 +61,24 @@ function tmp(prefix: string): string {
 	return dir;
 }
 
-/** A git repo on `main` with the given asks, optionally a registry script, and optionally a pushed upstream. */
-function makeRepo(asks: string, { registry = true, upstream = false } = {}): { root: string; cache: string } {
+/**
+ * A git repo on `main` with the given asks, optionally a registry script, optionally a pushed upstream,
+ * and, when `unruled` is given, a fake scripts/wo_record.py printing those lines.
+ */
+function makeRepo(
+	asks: string,
+	{ registry = true, upstream = false, unruled = null }: { registry?: boolean; upstream?: boolean; unruled?: string | null } = {},
+): { root: string; cache: string } {
 	const root = realpathSync(tmp("repo"));
 	git(root, "init", "-q", "-b", "main");
 	if (registry) {
 		mkdirSync(join(root, "scripts"));
 		writeFileSync(join(root, "scripts", "reviews_status.py"), FAKE_SCRIPT);
+	}
+	if (unruled !== null) {
+		mkdirSync(join(root, "scripts"), { recursive: true });
+		writeFileSync(join(root, "scripts", "wo_record.py"), FAKE_RECORD_SCRIPT);
+		writeFileSync(join(root, "unruled.txt"), unruled);
 	}
 	writeFileSync(join(root, "asks.txt"), asks);
 	git(root, "add", "-A");
@@ -245,5 +270,94 @@ describe("owner asks: pi extension wiring", () => {
 		const run = spawnSync(process.execPath, ["-e", code], { encoding: "utf8", timeout: 10_000 });
 		expect(run.error).toBeUndefined();
 		expect(run.status).toBe(0);
+	});
+});
+
+describe("owner asks: work-order departures", () => {
+	const UNRULED = "WO-2026-001 D1 Changed the mechanism.\nWO-2026-002 D2 Skipped Y.\n";
+
+	it("counts them in the status text, pluralised", () => {
+		expect(countText([], 1)).toBe("owner asks: 0 open · 1 unruled departure");
+		expect(countText([], 2)).toBe("owner asks: 0 open · 2 unruled departures");
+		expect(countText([])).toBe("owner asks: 0 open");
+	});
+
+	it("reads them at the upstream sha, caches them with the asks, and lists them after the asks", async () => {
+		const { root, cache } = makeRepo(ASKS_AB, { upstream: true, unruled: UNRULED });
+		const sha = git(root, "rev-parse", "@{u}");
+		const state = await ownerAsks(root, cache);
+		expect(state!.unruled).toEqual(["WO-2026-001 D1 Changed the mechanism.", "WO-2026-002 D2 Skipped Y."]);
+		await ownerAsks(root, cache);
+		const runs = () => fs.readFileSync(join(root, "record-runs.log"), "utf8").trim().split("\n");
+		expect(runs()).toEqual([`unruled ${sha}`]);
+		expect(await list(root, cache)).toEqual([
+			"docs/reviews/a.md  A1  soon  first",
+			"docs/reviews/a.md  A2  soon  second",
+			"WO-2026-001 D1 Changed the mechanism.",
+			"WO-2026-002 D2 Skipped Y.",
+		]);
+
+		writeFileSync(join(root, "unruled.txt"), "");
+		git(root, "-c", "commit.gpgsign=false", "commit", "-q", "-am", "ruled");
+		git(root, "push", "-q", "origin", "main");
+		const next = git(root, "rev-parse", "HEAD");
+		expect((await ownerAsks(root, cache))!.unruled).toEqual([]);
+		expect(runs()).toEqual([`unruled ${sha}`, `unruled ${next}`]);
+	});
+
+	it("reads a cache written before departures existed again", async () => {
+		const { root, cache } = makeRepo(ASKS_AB, { upstream: true, unruled: UNRULED });
+		await ownerAsks(root, cache);
+		const [cacheFile] = readdirSync(cache).filter((f) => f.endsWith(".parsed.json"));
+		const old = JSON.parse(fs.readFileSync(join(cache, cacheFile), "utf8"));
+		fs.writeFileSync(join(cache, cacheFile), JSON.stringify({ sha: old.sha, lines: old.lines }));
+		expect((await ownerAsks(root, cache))!.unruled).toHaveLength(2);
+	});
+
+	it("reads nothing from a repo without wo_record.py", async () => {
+		const { root, cache } = makeRepo(ASKS_AB);
+		expect((await ownerAsks(root, cache))!.unruled).toEqual([]);
+		expect(fs.existsSync(join(root, "record-runs.log"))).toBe(false);
+	});
+
+	it("counts as attention, and the statusline draws it in warning colour", () => {
+		const { root } = makeRepo(ASKS_AB, { unruled: "WO-2026-001 D1 x\n" });
+		const out = spawnSync(process.execPath, [CLI, "statusline"], {
+			input: JSON.stringify({ cwd: root }),
+			env: { ...process.env, HOME: tmp("home") },
+			encoding: "utf8",
+		});
+		expect(out.stdout).toBe(`${basename(root)} · main · \x1b[33mowner asks: 2 open · 1 unruled departure\x1b[0m\n`);
+	});
+
+	it("shows in the pi status bar with nothing new, in the warning colour", async () => {
+		const handlers: Record<string, (event: unknown, ctx: unknown) => unknown> = {};
+		const pi = {
+			on: (event: string, handler: (event: unknown, ctx: unknown) => unknown) => {
+				handlers[event] = handler;
+			},
+			registerCommand: () => {},
+		};
+		const statuses: (string | undefined)[] = [];
+		const { root } = makeRepo("", { unruled: "WO-2026-001 D1 x\n" });
+		const ctx = {
+			cwd: root,
+			hasUI: true,
+			ui: {
+				setStatus: (_key: string, text: string | undefined) => statuses.push(text),
+				theme: { fg: (color: string, text: string) => `[${color}]${text}` },
+				notify: () => {},
+			},
+		};
+		loadExtension(pi as never);
+		handlers.session_start({}, ctx);
+		await settle();
+		expect(statuses.at(-1)).toBe("[warning]owner asks: 0 open · 1 unruled departure");
+		await handlers.session_shutdown({}, ctx);
+	});
+
+	it("attention is false when neither new asks nor departures exist", async () => {
+		const { root, cache } = makeRepo(ASKS_AB, { unruled: "" });
+		expect(attention((await ownerAsks(root, cache))!)).toBe(false);
 	});
 });
