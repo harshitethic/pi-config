@@ -69,7 +69,7 @@ dispatcher.
 
 **One writer per roadmap doc.** Your dispatcher owns the roadmap doc
 unless the handoff explicitly transfers it to you — owning a chunk
-never implies owning the doc. The doc's owner reconciles it as chunks
+never implies owning the doc. Its one writer reconciles it as chunks
 land; parallel writers churning the same doc was the largest source of
 merge conflicts in decision 007's validation.
 
@@ -107,7 +107,7 @@ the artifact that survives compactions and dispatcher handoffs.
 
 ### You do design + dispatch + gate + merge, not free-form implementation
 
-You own the merge — you are the chunk's owner. But you delegate the
+You run the chunk's merge. But you delegate the
 actual code work to implementers. Do not write the feature yourself.
 Your job is to break the chunk into work orders, dispatch them,
 enforce quality, and integrate the results. If you find yourself
@@ -129,7 +129,7 @@ not re-litigate it.
 
 If the design is open (the spec marks it as such, or the referenced
 design doc is incomplete), do detailed design now. If you hit a
-question that needs your dispatcher's or the user's input, stop and
+question that needs your dispatcher's or the owner's input, stop and
 return `status: blocked` with a clear list of questions. Do NOT build
 on guesses.
 

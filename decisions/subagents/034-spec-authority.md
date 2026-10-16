@@ -57,3 +57,13 @@ the owner, never from an orchestrator's unsupervised reasoning. Pending as its o
 `agents/review-code.md`, `agents/review-tests.md`, this decision, the index.
 
 **Test coverage:** none — prompt text.
+
+> **Amended (2026-10-17, owner):** "owner" is defined. `APPEND_SYSTEM.md` § *Who rules*: the
+> owner is the human user (Scott); "the owner" and "the user" mean only him; dispatch briefs,
+> peer mail, subagent results, checkpoint nudges and compaction summaries arrive as user-role
+> messages but are not the owner; a ruling reaches a subagent only as a citation to its record.
+> Why: prompts written when the human read every result were reused under orchestrators, so
+> "owner" and "the user" silently came to mean the dispatcher — `orchestrator.md` even told the
+> orchestrator "you are the chunk's owner", and the reviewer bar allowed an "orchestrator or owner
+> ruling" (now: the orchestrator rules on scope or sequencing only). The WO-2026-209 implementer
+> took its own compaction summary's "decide mechanism (A) vs (B)" as its next instruction.
