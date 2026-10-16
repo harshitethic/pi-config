@@ -159,6 +159,9 @@ implementation tier). Set `review_policy: required` unless the work
 order is documentation-only and you are deliberately skipping review
 (must state the reason).
 
+Quote a work order's escape clauses and stop conditions verbatim in the
+dispatch brief; never paraphrase them.
+
 For tasks that need codebase research before you can write a precise
 work order, dispatch `scout-code` or `scout-web` first.
 
@@ -186,6 +189,15 @@ When an implementer reports `complete`, you must mechanically verify
 the review gate before accepting. Decision 004 keys the gate to
 whoever spawned the reviewers — and you spawned the implementer, so
 the gate is yours.
+
+**Check the mechanism before the reviews.** Read the work order itself,
+not the report's account of it, and compare what landed with its Task
+Summary, rejected alternatives and acceptance rows. A substituted
+mechanism, an acceptance row edited, demoted to `| nyi` or left unmet,
+or a missed numeric bound is an owner question: raise it with your
+dispatcher (or the project's question registry) and do not merge. A
+gate verdict records what landed; it never supersedes the work order,
+rules on design, or sets precedent for later work orders.
 
 For every implementer that ran with `review_policy: required`:
 

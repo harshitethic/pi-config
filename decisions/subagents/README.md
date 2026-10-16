@@ -39,3 +39,4 @@ date: 2026-07-14
 | 030 | Resume pre-check for a missing stored cwd (upstream ask recorded, unfiled) | done |
 | 031 | The orchestrator seat always runs on its caller's model (caller `provider/id` + the seat's level) | done |
 | 032 | Work-order `review_policy` grammar — dash-optional bold line, one shared resolver, mirror synced | done |
+| 034 | Spec authority — only the owner changes a work order's mechanism, rejected alternatives or acceptance rows; a falsified premise stops the run | active |

@@ -102,6 +102,12 @@ This is your primary value — be thorough.
   Suggested fix: [brief note for orchestrator]
 
   Do NOT attempt to fix the plan yourself. Return the mismatch.
+  This overrides any brief or work-order wording that invites you to
+  "propose" or "correct" a mechanism: proposing means putting it in
+  the mismatch report, never landing it. A mechanism other than the one
+  the work order specifies is a plan mismatch, not a
+  `deviations_from_spec` entry. A wrong-value path inside the bug class
+  the work order targets is in scope, not a bug-triage handoff.
 - **Spec gap, not a guess.** Tests are a lower bound on intended
   behavior, not a spec — missing coverage never makes a behavior
   optional. If behavior the tests don't cover is unclear and a
