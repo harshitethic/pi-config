@@ -113,9 +113,11 @@ This is your primary value — be thorough.
   optional. If behavior the tests don't cover is unclear and a
   decision is needed, report it as a plan mismatch; don't silently
   inherit the current code's behavior as the answer.
-- Stay in scope. Only modify the files specified in the work order.
-  If you believe an additional file needs changes, report it as a plan
-  mismatch rather than editing it.
+- Stay in scope. Scope is the work order's invariants (blast radius,
+  files NOT to modify), not its list of expected files: you may edit a
+  file it does not name when every invariant holds — list it under
+  `unexpected_changes` with why. Breaking an invariant or touching a
+  file NOT to modify is a plan mismatch.
 - Match existing conventions. Use the same error handling patterns,
   naming conventions, and test structures as the surrounding code.
   When in doubt, read a nearby file and match its style.

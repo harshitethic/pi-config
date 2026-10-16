@@ -32,11 +32,25 @@ Your work order quality directly determines whether the implementer succeeds on 
 
 **Goal**: <the specific outcome the implementer must produce — not the "how," the "what">
 
+### Premise
+
+<The one fact the specified mechanism depends on, and the probe that would falsify it.> If falsified:
+stop, report `PREMISE FALSIFIED` with the evidence; nothing lands.
+
+### Rejected alternatives
+
+Only alternatives the owner rejected, each citing its ruling (decision, registry row or brief with
+date). Never filled from the order author's own reasoning; omit the section when there are none.
+Landing a listed alternative is not this work order.
+
 ### Scope
 
-**Files to modify** (list every file the implementer is expected to touch):
+**Invariants** (the blast radius — what must not change): <behaviour, layouts, passes or files that
+must stay untouched, and why>. Scope is these invariants, not a file list: an implementer may edit a
+file not named below when the invariants hold, and lists it under `unexpected_changes` with why.
+
+**Files expected to change** (guidance, not a limit):
 - `path/to/file.rs` — <what changes in this file>
-- `path/to/other.rs` — <what changes in this file>
 
 **Files to read (reference only, do not modify)**:
 - `path/to/reference.rs` — <why the implementer needs to read this>

@@ -74,3 +74,9 @@ the owner, never from an orchestrator's unsupervised reasoning. Pending as its o
 > holds the merge until the owner rules. Why: WO-2026-195's replaced byte-identity criterion was
 > a sound call the owner would have accepted, but it surfaced only inside a gate verdict and a
 > decision's Outcome section — a relayed message is buried by the recipient's later output.
+
+> **Amended (2026-10-17, owner):** work-order scope is its invariants (blast radius, files not to
+> modify), not a list of files to edit — ratifying TFD WO-2026-200's gate observation, whose
+> "`tail_graph.rs` only" line was wrong because the fix's seat was an implicit ABI parameter. The
+> `work-order-template` gains *Premise* (stop on falsification) and *Rejected alternatives* (owner
+> rulings only, each cited; never the author's own reasoning) sections.
