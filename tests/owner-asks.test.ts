@@ -1,0 +1,249 @@
+/**
+ * Owner asks (extensions/owner-asks): the counting logic in lib.ts and the
+ * Claude Code statusline CLI. Fixtures are real git repos with a fake
+ * scripts/reviews_status.py that prints asks.txt (read from the --ref commit when
+ * one is given), so assertions are about the contract, not tfd's registry.
+ */
+
+import { afterAll, describe, expect, it } from "bun:test";
+import { execFileSync, spawnSync } from "node:child_process";
+import * as fs from "node:fs";
+import { mkdtempSync, mkdirSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, join } from "node:path";
+import loadExtension from "../extensions/owner-asks/index.ts";
+import { ack, countText, list, ownerAsks } from "../extensions/owner-asks/lib.ts";
+
+const CLI = join(import.meta.dir, "..", "extensions", "owner-asks", "external.ts");
+
+const FAKE_SCRIPT = `
+import subprocess, sys
+args = sys.argv[1:]
+ref = args[args.index("--ref") + 1] if "--ref" in args else None
+with open("runs.log", "a") as f:
+    f.write(f"{ref}\\n")
+if ref:
+    text = subprocess.run(["git", "show", f"{ref}:asks.txt"], capture_output=True, text=True, check=True).stdout
+else:
+    text = open("asks.txt").read()
+sys.stdout.write(text)
+`;
+
+const GIT_ENV = {
+	...process.env,
+	GIT_AUTHOR_NAME: "t",
+	GIT_AUTHOR_EMAIL: "t@t",
+	GIT_COMMITTER_NAME: "t",
+	GIT_COMMITTER_EMAIL: "t@t",
+};
+
+const git = (cwd: string, ...args: string[]): string =>
+	execFileSync("git", args, { cwd, env: GIT_ENV, encoding: "utf8" }).trim();
+
+const tmpRoots: string[] = [];
+function tmp(prefix: string): string {
+	const dir = mkdtempSync(join(tmpdir(), `owner-asks-${prefix}-`));
+	tmpRoots.push(dir);
+	return dir;
+}
+
+/** A git repo on `main` with the given asks, optionally a registry script, and optionally a pushed upstream. */
+function makeRepo(asks: string, { registry = true, upstream = false } = {}): { root: string; cache: string } {
+	const root = realpathSync(tmp("repo"));
+	git(root, "init", "-q", "-b", "main");
+	if (registry) {
+		mkdirSync(join(root, "scripts"));
+		writeFileSync(join(root, "scripts", "reviews_status.py"), FAKE_SCRIPT);
+	}
+	writeFileSync(join(root, "asks.txt"), asks);
+	git(root, "add", "-A");
+	git(root, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "init");
+	if (upstream) {
+		const bare = tmp("remote");
+		git(bare, "init", "-q", "--bare");
+		git(root, "remote", "add", "origin", bare);
+		git(root, "push", "-q", "-u", "origin", "main");
+	}
+	return { root, cache: join(tmp("cache"), "owner-asks") };
+}
+
+const ASKS_AB = "docs/reviews/a.md  A1  soon  first\ndocs/reviews/a.md  A2  soon  second\n";
+
+afterAll(() => {
+	for (const dir of tmpRoots) rmSync(dir, { recursive: true, force: true });
+});
+
+describe("owner asks: new = open - seen", () => {
+	it("flags only asks added since the last ack, and ack clears them", async () => {
+		const { root, cache } = makeRepo(ASKS_AB);
+		const first = await ownerAsks(root, cache);
+		expect(first!.asks.map((a) => [a.key, a.isNew])).toEqual([
+			["docs/reviews/a.md#A1", false],
+			["docs/reviews/a.md#A2", false],
+		]);
+
+		writeFileSync(join(root, "asks.txt"), ASKS_AB + "docs/reviews/b.md  B1  later  third\n");
+		const second = await ownerAsks(root, cache);
+		expect(second!.asks.map((a) => [a.key, a.isNew])).toEqual([
+			["docs/reviews/a.md#A1", false],
+			["docs/reviews/a.md#A2", false],
+			["docs/reviews/b.md#B1", true],
+		]);
+		expect(countText(second!.asks)).toBe("owner asks: 3 open · 1 new");
+
+		expect(await list(root, cache)).toEqual([
+			"docs/reviews/b.md  B1  later  third",
+			"docs/reviews/a.md  A1  soon  first",
+			"docs/reviews/a.md  A2  soon  second",
+		]);
+
+		await ack(root, cache);
+		const acked = await ownerAsks(root, cache);
+		expect(acked!.asks.some((a) => a.isNew)).toBe(false);
+		expect(countText(acked!.asks)).toBe("owner asks: 3 open");
+	});
+});
+
+describe("owner asks: first run", () => {
+	it("seeds the seen set with the current open asks, so nothing is new", async () => {
+		const { root, cache } = makeRepo(ASKS_AB);
+		const state = await ownerAsks(root, cache);
+		expect(state!.asks.every((a) => !a.isNew)).toBe(true);
+		const [seenFile] = readdirSync(cache).filter((f) => f.endsWith(".seen"));
+		expect(JSON.parse(fs.readFileSync(join(cache, seenFile), "utf8"))).toEqual([
+			"docs/reviews/a.md#A1",
+			"docs/reviews/a.md#A2",
+		]);
+	});
+});
+
+describe("owner asks: cache by upstream sha", () => {
+	it("runs the script once per upstream sha and reads the ref it names", async () => {
+		const { root, cache } = makeRepo(ASKS_AB, { upstream: true });
+		const firstSha = git(root, "rev-parse", "@{u}");
+		await ownerAsks(root, cache);
+		await ownerAsks(root, cache);
+		const runs = () => fs.readFileSync(join(root, "runs.log"), "utf8").trim().split("\n");
+		expect(runs()).toEqual([firstSha]);
+
+		writeFileSync(join(root, "asks.txt"), ASKS_AB + "docs/reviews/b.md  B1  later  third\n");
+		git(root, "-c", "commit.gpgsign=false", "commit", "-q", "-am", "add B1");
+		git(root, "push", "-q", "origin", "main");
+		const sha = git(root, "rev-parse", "HEAD");
+
+		const state = await ownerAsks(root, cache);
+		expect(runs()).toEqual([firstSha, sha]);
+		const b1 = state!.asks.find((a) => a.key === "docs/reviews/b.md#B1");
+		expect(b1?.isNew).toBe(true);
+	});
+});
+
+describe("owner asks: non-registry repos", () => {
+	it("returns null for a repo without scripts/reviews_status.py, and for a non-git dir", async () => {
+		const { root, cache } = makeRepo(ASKS_AB, { registry: false });
+		expect(await ownerAsks(root, cache)).toBeNull();
+		expect(await list(root, cache)).toBeNull();
+		expect(await ack(root, cache)).toBeNull();
+
+		const bare = realpathSync(tmp("plain"));
+		expect(await ownerAsks(bare, cache)).toBeNull();
+	});
+});
+
+describe("owner asks: statusline CLI", () => {
+	const statusline = (input: object, home: string) =>
+		spawnSync(process.execPath, [CLI, "statusline"], {
+			input: JSON.stringify(input),
+			env: { ...process.env, HOME: home },
+			encoding: "utf8",
+		});
+
+	it("prints dir · branch · asks for a registry repo", () => {
+		const { root } = makeRepo(ASKS_AB);
+		const home = tmp("home");
+		const out = statusline({ workspace: { current_dir: root } }, home);
+		expect(out.status).toBe(0);
+		expect(out.stdout).toBe(`${basename(root)} · main · owner asks: 2 open\n`);
+	});
+
+	it("prints only dir · branch outside a registry repo", () => {
+		const { root } = makeRepo(ASKS_AB, { registry: false });
+		const out = statusline({ cwd: root }, tmp("home"));
+		expect(out.stdout).toBe(`${basename(root)} · main\n`);
+	});
+});
+
+/** session_start fires its refresh without awaiting it; a registry repo's status lands after its git and script calls. */
+const settle = () => new Promise((resolve) => setTimeout(resolve, 200));
+
+describe("owner asks: pi extension wiring", () => {
+	it("clears the status outside a registry repo, and /asks reports that instead of acking", async () => {
+		const handlers: Record<string, (event: unknown, ctx: unknown) => unknown> = {};
+		const commands: Record<string, { handler: (args: string, ctx: unknown) => Promise<void> }> = {};
+		const pi = {
+			on: (event: string, handler: (event: unknown, ctx: unknown) => unknown) => {
+				handlers[event] = handler;
+			},
+			registerCommand: (name: string, opts: { handler: (args: string, ctx: unknown) => Promise<void> }) => {
+				commands[name] = opts;
+			},
+		};
+		const statuses: (string | undefined)[] = [];
+		const notes: string[] = [];
+		const { root } = makeRepo(ASKS_AB, { registry: false });
+		const ctx = {
+			cwd: root,
+			hasUI: true,
+			ui: {
+				setStatus: (_key: string, text: string | undefined) => statuses.push(text),
+				theme: { fg: (_color: string, text: string) => text },
+				notify: (text: string) => notes.push(text),
+			},
+		};
+		loadExtension(pi as never);
+		handlers.session_start({}, ctx);
+		await settle();
+		expect(statuses).toHaveLength(1);
+		expect(statuses[0]).toBeUndefined();
+
+		await commands.asks.handler("", ctx);
+		expect(notes).toEqual(["not a registry repo (no scripts/reviews_status.py)"]);
+
+		// session_shutdown clears the 60 s timer; without it the test process would not exit.
+		await handlers.session_shutdown({}, ctx);
+	});
+
+	it("stays silent without a UI (print mode), so no timer keeps the process alive", async () => {
+		const handlers: Record<string, (event: unknown, ctx: unknown) => unknown> = {};
+		const pi = {
+			on: (event: string, handler: (event: unknown, ctx: unknown) => unknown) => {
+				handlers[event] = handler;
+			},
+			registerCommand: () => {},
+		};
+		const statuses: unknown[] = [];
+		const { root } = makeRepo(ASKS_AB);
+		loadExtension(pi as never);
+		handlers.session_start({}, {
+			cwd: root,
+			hasUI: false,
+			ui: { setStatus: (_key: string, text: unknown) => statuses.push(text) },
+		});
+		await settle();
+		await handlers.session_shutdown({}, {});
+		expect(statuses).toHaveLength(0);
+	});
+	it("does not hold a print-mode process open (the 60 s interval is never started)", () => {
+		const { root } = makeRepo(ASKS_AB);
+		const code = `
+			const handlers = {};
+			const pi = { on: (e, h) => { handlers[e] = h; }, registerCommand: () => {} };
+			const { default: ext } = await import(${JSON.stringify(join(import.meta.dir, "..", "extensions", "owner-asks", "index.ts"))});
+			ext(pi);
+			await handlers.session_start({}, { cwd: ${JSON.stringify(root)}, hasUI: false, ui: {} });
+		`;
+		const run = spawnSync(process.execPath, ["-e", code], { encoding: "utf8", timeout: 10_000 });
+		expect(run.error).toBeUndefined();
+		expect(run.status).toBe(0);
+	});
+});
