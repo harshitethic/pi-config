@@ -46,6 +46,8 @@ Read relevant docs before implementing a feature or change. Keep docs up to date
 
 **Share code, don't parallel it:** When new work overlaps existing code, extract a shared helper and call it from both — refactor the existing code if needed. "Mirror the pattern in X" usually means copy: generalize X, don't write X-prime. Build parallel only if the cases genuinely diverge in a way extraction can't bridge, and say why. (The rule above forbids a second *validator/check*; this forbids a second *implementation* of the same logic.)
 
+**Make a rule complete by structure, not by enumeration:** When a rule must hold on every path — every way a value is constructed, every place a value meets an expected type, every caller of a check — count the producers first (`rg` the constructor or call). If there is more than one, funnel them into one path the type system enforces (private fields plus one builder, one entry function) behind characterization tests, then put the rule in the funnel. A list of paths, each handled, is incomplete the day someone adds a path; listed paths belong in the tests as a lower bound, not in the mechanism.
+
 **New public surface needs an ask.** Don't add public surface on your own initiative — an API, CLI flag, config key, tool, or language syntax is user-facing surface: discuss it with the user first, or write a brief and wait for an answer. Internal-only code with no user-visible surface is exempt.
 
 **Don't trade an optimization for a bug dodge:** A correct, load-bearing hoist/CSE/reuse gets its exposed bug *fixed*, not routed around by un-hoisting or duplicating the call — a pure call with an arena/pointer arg isn't CSE'd, so duplicating it is a real cost, not a free no-op.

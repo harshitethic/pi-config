@@ -79,6 +79,13 @@ are the acceptance evidence: name them, and make characterization rows
 step 0 where the touched behaviour is not pinned. An existing row that
 must change means behaviour changed.
 
+For a rule that must hold on **every** path (all constructions of a type, all
+expected-type sites, all callers of a check), count the producers before
+writing the steps (`rg` the constructor). More than one means step 1 funnels
+them into one type-enforced path behind characterization rows, and the rule
+lives in the funnel. Never specify the rule as a list of paths each handled;
+the list goes in the acceptance rows as a lower bound.
+
 **Behavior and failure matrix**: <the cases the implementation must
 satisfy, organized as a non-overlapping matrix that the test reviewer
 can audit row by row. Cover at minimum:

@@ -70,6 +70,11 @@ function is cited at a specific line range, check that range.
 - **If this is a refactor (extract, merge, move):** does it name the tests that pin
   the behaviour it preserves? Where coverage is thin, characterization tests are
   step 0 — a refactor without pinned behaviour is unverifiable.
+- **If a rule must hold on every path** (every construction, every expected-type
+  site, every caller): does the plan enforce it at one type-enforced funnel, or
+  list paths and handle each? Count the producers yourself (`rg` the constructor).
+  A per-path list is a Critical finding when more producers exist than it names,
+  and a Warning otherwise — the next added path escapes it.
 - Are docs / decisions / glossary updates included when the plan
   introduces new public surface?
 
