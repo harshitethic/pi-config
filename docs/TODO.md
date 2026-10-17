@@ -12,11 +12,11 @@ discrepancy is explicit, so this is outcome-measured, not benchmark-trusted. See
 `decisions/subagents/023-mimo-decorrelated-reviewer-experiment.md`.
 ---
 
-# OpenRouter-only fleet — deepseek/deepseek-v4.1-flash (decision 022)
+# OpenRouter-only fleet — deepseek/deepseek-v4.1-flash-1017 (decisions 022 + 035)
 
 **Status**: done 2026-10-01 (in-session, no WO; decision `decisions/subagents/022-openrouter-fleet-v41-flash.md`).
 z.ai subscription ended → all seats (orchestrator/implement/reviewers/scouts/oracle/compaction)
-on `deepseek/deepseek-v4.1-flash`; `/fleet-model` toggle + override deleted; oracle moved off
+on `deepseek/deepseek-v4.1-flash-1017`; `/fleet-model` toggle + override deleted; oracle moved off
 0813-pro (v4.1-flash beats it: CF 3471 vs 3348, Apex 65.6 vs 65.3, DeepSWE 74.2 vs 62.7);
 `models.json` pin transferred to v4.1-flash first-party. Effort audited: implement/reviewers `:high`,
 orchestrator/oracle `:max`, scouts/compaction `:low`. Scouts' original `:medium` was a silent no-op

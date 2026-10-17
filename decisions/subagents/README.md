@@ -41,3 +41,4 @@ date: 2026-07-14
 | 032 | Work-order `review_policy` grammar — dash-optional bold line, one shared resolver, mirror synced | done |
 | 033 | Reviewer approval bar (mitigation defined) + parallel-mechanism, decision-placement and duplicate-coverage checks | active |
 | 034 | Spec authority — only the owner changes a work order's mechanism, rejected alternatives or acceptance rows; a falsified premise stops the run | active |
+| 035 | Fleet model id → `deepseek/deepseek-v4.1-flash-1017` (Oct 17 checkpoint; pin + store hand-merge) | done |

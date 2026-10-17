@@ -67,7 +67,7 @@ per-benchmark pages + OpenRouter `/models` + `/benchmarks`, all fetched 2026-07-
 > snapshot data (out of fleet; the next data refresh drops them).
 >
 > **2026-10-01 fleet move (decision [022](../decisions/subagents/022-openrouter-fleet-v41-flash.md)):**
-> z.ai is gone — every seat runs `deepseek/deepseek-v4.1-flash` (orchestrator/oracle
+> z.ai is gone — every seat runs `deepseek/deepseek-v4.1-flash-1017` (orchestrator/oracle
 > `:max`, implement/reviewers `:high`, scouts/compaction `:low` after the effort audit), the
 > `/fleet-model` toggle +
 > `~/.pi/fleet-model.json` override are deleted, and the oracle moved off
@@ -83,6 +83,10 @@ per-benchmark pages + OpenRouter `/models` + `/benchmarks`, all fetched 2026-07-
 > (`review-code`/`review-plan`/`review-tests`) now runs the MiMo Flash decorrelation
 > experiment (decision 023) — Xiaomi reviewers against the DeepSeek implementer. The tables below
 > are unchanged 2026-08-01 snapshot data and contain no v4.1 row.
+>
+> **2026-10-18 checkpoint refresh (decision 035):** the fleet model id moves to
+> `deepseek/deepseek-v4.1-flash-1017` (Oct 17 checkpoint; same seat split and effort
+> levels). Vendor card: TB4.0 31.2→42.3, DeepSWE 74.2→77.0, Apex 64.6→72.1, shorter outputs.
 
 ---
 
@@ -93,7 +97,7 @@ per-benchmark pages + OpenRouter `/models` + `/benchmarks`, all fetched 2026-07-
 | **Orchestrator** | **GPT-5.6 Luna** (93.6, $0.04, 1M) | **DeepSeek V4.1 Flash** (`:max` — decision 022, current fleet) | Luna's live price collapsed ($0.41 → **$0.04**/M blended). The 2026-08-01 snapshot had no v4.1 row; the fleet reverts to DeepSeek after the z.ai plan ended. DeepSeek V4 Flash 0731 projects 85.2 Orch — **proxy, unmeasured** (see refresh note 3). |
 | **Implementer** | **Grok 4.5** (98.8, $0.62) | **DeepSeek V4.1 Flash** (`:high` — decision 022, current fleet) · **DeepSeek V4 Flash 0731** (83.7 ⚠, **$0.019**) | All seats share one model since 2026-10-01; 0731 remains the snapshot's cheap coder — AA-index-only. Pro at `high` scores 48.8. |
 | **Oracle (math/algo)** | **DeepSeek V4 Pro** (91.9, snapshot) | **DeepSeek V4.1 Flash** (`:max` — decision 022; CF 3471 / Apex 65.6 beats Pro) | LCB/IMO/HMMT unpublished for 0731, so the snapshot held Pro; v4.1-flash's vendor-card Codeforces/Apex/DeepSWE rows supersede it (022). |
-| **Reviewer (standard)** | **MiMo V2.5 Pro** (54.9 / 58.2, **$0.055**, 1M) | — | Now same-lab with the implementer (`deepseek/deepseek-v4.1-flash` — decision 022); the decorrelated seat no longer exists, 017's mechanical checks carry anti-fabrication. |
+| **Reviewer (standard)** | **MiMo V2.5 Pro** (54.9 / 58.2, **$0.055**, 1M) | — | The review tier runs `xiaomi/mimo-v2.6-flash` — Xiaomi-lab, decorrelated from the DeepSeek implementer (experiment 023; supersedes 022's same-lab stopgap, which 017's mechanical checks covered while it lasted). |
 
 **Two value stars, different jobs:**
 - **DeepSeek V4.1 Flash** (OpenRouter, 1M ctx, multimodal) — the 2026-09-10 successor that
@@ -105,17 +109,17 @@ per-benchmark pages + OpenRouter `/models` + `/benchmarks`, all fetched 2026-07-
 - **GLM-5.3 / GLM-5.3-flash** — retained as history: they ran the fleet on the z.ai plan
   until the subscription ended (decision 020; effort split 021).
 
-**Current assignments vs. the data** (see [Role-by-role review](#role-by-role-review-2026-08-01--historical-audit); fleet moved 2026-10-01 per [decision 022](../decisions/subagents/022-openrouter-fleet-v41-flash.md)):
+**Current assignments vs. the data** (see [Role-by-role review](#role-by-role-review-2026-08-01--historical-audit); fleet moved 2026-10-01 per [decision 022](../decisions/subagents/022-openrouter-fleet-v41-flash.md); model id refreshed to the -1017 checkpoint 2026-10-18 per [decision 035](../decisions/subagents/035-flash-1017-refresh.md) — the "moved 2026-10-01" verdicts record when each seat adopted its model/level, not the id suffix):
 
 | Slot | Agent file | Model | Effort | Verdict |
 |---|---|---|---|---|
-| Main session | `settings.json` | deepseek/deepseek-v4.1-flash | `defaultThinkingLevel` — `max` | ✓ moved 2026-10-01 (decision 022; user's settings flip to openrouter default) |
-| Orchestrator-subagent | `agents/orchestrator.md` | deepseek/deepseek-v4.1-flash | max | ✓ moved 2026-10-01 (decision 022) |
-| Implementer | `agents/implement.md` | deepseek/deepseek-v4.1-flash | high | ✓ moved 2026-10-01 (decision 022) |
-| Oracle | `agents/math-algo-oracle.md` | deepseek/deepseek-v4.1-flash | max | ✓ moved 2026-10-01 (decision 022; beats 0813 on CF/Apex/DeepSWE/TB2.1) |
+| Main session | `settings.json` | deepseek/deepseek-v4.1-flash-1017 | `defaultThinkingLevel` — `max` | ✓ moved 2026-10-01 (decision 022; user's settings flip to openrouter default) |
+| Orchestrator-subagent | `agents/orchestrator.md` | deepseek/deepseek-v4.1-flash-1017 | max | ✓ moved 2026-10-01 (decision 022) |
+| Implementer | `agents/implement.md` | deepseek/deepseek-v4.1-flash-1017 | high | ✓ moved 2026-10-01 (decision 022) |
+| Oracle | `agents/math-algo-oracle.md` | deepseek/deepseek-v4.1-flash-1017 | max | ✓ moved 2026-10-01 (decision 022; beats 0813 on CF/Apex/DeepSWE/TB2.1) |
 | Review standard ×3 | `agents/review-{code,plan,tests}.md` | xiaomi/mimo-v2.6-flash (experiment 023) | high | ✓ whole review tier moved 2026-10-01 (023) — decorrelated from the DeepSeek implementer |
-| Scouts ×2 | `agents/scout-{code,web}.md` | deepseek/deepseek-v4.1-flash | low | ✓ moved 2026-10-01 (decision 022; `:medium` was a silent clamp to high, replaced with the real discount tier for read-only research) |
-| Compaction | `extensions/compaction-model.ts` | deepseek/deepseek-v4.1-flash | low | ✓ moved 2026-10-01 (decision 022; constant target, explicit `:low` — without a level it rode the provider default `high`) |
+| Scouts ×2 | `agents/scout-{code,web}.md` | deepseek/deepseek-v4.1-flash-1017 | low | ✓ moved 2026-10-01 (decision 022; `:medium` was a silent clamp to high, replaced with the real discount tier for read-only research) |
+| Compaction | `extensions/compaction-model.ts` | deepseek/deepseek-v4.1-flash-1017 | low | ✓ moved 2026-10-01 (decision 022; constant target, explicit `:low` — without a level it rode the provider default `high`) |
 
 > History note: the **review deep ×3** rows (`agents/review-*-deep.md`) were
 > **deleted 2026-08-28** — the tier fired once ever; quality rationale lapsed; see
@@ -198,11 +202,10 @@ implementers — a same-lab reviewer is an independence risk regardless of score
 | DeepSeek V4 Flash (High) | 16.3 | 17.5 | 0.029 | 1048K | DeepSeek ✗ same-lab |
 | MiMo-V2.5 | 17.5 | 13.2 | **0.019** | 1048K | Xiaomi ✓ |
 
-The reviewer seat is now **single-tier** — the standard reviewers run `deepseek/deepseek-v4.1-flash`
-at `:high` (decision 022; the level survived 021, the GLM basis did not); the two-tier split
-(MiMo standard / GLM-5.2 deep) is deleted.
-Note **0731's 80.4 R-code is a same-lab AA-index projection** — the seat accepts same-lab
-for cost, with 017's mechanical checks carrying anti-fabrication.
+The reviewer seat is now **single-tier** — it first ran the fleet flash at `:high` (decision 022; the level survived 021, the GLM basis did not), and since 2026-10-01 the whole tier runs `xiaomi/mimo-v2.6-flash:high` (experiment 023, decorrelated); the two-tier
+split (MiMo standard / GLM-5.2 deep) is deleted.
+Note **0731's 80.4 R-code is a same-lab AA-index projection** — while the seat was same-lab
+(022), it accepted that for cost, with 017's mechanical checks carrying anti-fabrication.
 
 ---
 

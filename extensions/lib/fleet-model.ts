@@ -10,4 +10,4 @@
 
 export const FLEET_PROVIDER = "openrouter"
 
-export const FLEET_MODEL = "deepseek/deepseek-v4.1-flash"
+export const FLEET_MODEL = "deepseek/deepseek-v4.1-flash-1017"

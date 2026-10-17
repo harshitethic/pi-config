@@ -1,7 +1,7 @@
 ---
 name: math-algo-oracle
 description: Stateless reasoning specialist for self-contained type system, algorithm, and discrete math questions in compiler development. Use when you have a fully specified question that can be answered WITHOUT repo exploration — type soundness arguments, algorithm correctness proofs, invariant analysis, edge case enumeration, complexity analysis, data structure selection. Read-only tools only. The caller must provide all necessary context inline in the task. Do NOT use for implementation, repo navigation, or multi-step debugging.
-model: deepseek/deepseek-v4.1-flash:max
+model: deepseek/deepseek-v4.1-flash-1017:max
 tools: read, grep, find, ls
 ---
 

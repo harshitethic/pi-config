@@ -35,7 +35,7 @@ import subagentFactory, {
 import { FLEET_MODEL } from "../extensions/lib/fleet-model.ts";
 
 // What agents/orchestrator.md pins (the seat's own audited level, decision 022).
-const ORCHESTRATOR_SEAT = "deepseek/deepseek-v4.1-flash:max";
+const ORCHESTRATOR_SEAT = "deepseek/deepseek-v4.1-flash-1017:max";
 // A caller that is deliberately NOT on the seat's model — that is the whole
 // point of the rule; on today's single-slug fleet this is the no-op case.
 const OTHER_CALLER = "openrouter/xiaomi/mimo-v2.6-flash";
@@ -66,7 +66,7 @@ describe("resolveChildModel — the orchestrator seat tracks its caller", () => 
 		expect(
 			resolveChildModel({
 				agentName: "orchestrator",
-				agentModel: "deepseek/deepseek-v4.1-flash",
+				agentModel: "deepseek/deepseek-v4.1-flash-1017",
 				parentModel: OTHER_CALLER,
 			}),
 		).toBe(OTHER_CALLER);
@@ -78,7 +78,7 @@ describe("resolveChildModel — the orchestrator seat tracks its caller", () => 
 		expect(
 			resolveChildModel({
 				agentName: "orchestrator",
-				agentModel: "openrouter/deepseek/deepseek-v4.1-flash:free",
+				agentModel: "openrouter/deepseek/deepseek-v4.1-flash-1017:free",
 				parentModel: OTHER_CALLER,
 			}),
 		).toBe(OTHER_CALLER);
@@ -113,17 +113,17 @@ describe("resolveChildModel — every other seat keeps the existing rule", () =>
 		expect(
 			resolveChildModel({
 				agentName: "implement",
-				agentModel: "deepseek/deepseek-v4.1-flash:high",
+				agentModel: "deepseek/deepseek-v4.1-flash-1017:high",
 				parentModel: OTHER_CALLER,
 			}),
-		).toBe("deepseek/deepseek-v4.1-flash:high");
+		).toBe("deepseek/deepseek-v4.1-flash-1017:high");
 	});
 
 	it("passes the caller's model through unsubstituted when the spawn opts in (decision 020)", () => {
 		expect(
 			resolveChildModel({
 				agentName: "implement",
-				agentModel: "deepseek/deepseek-v4.1-flash:high",
+				agentModel: "deepseek/deepseek-v4.1-flash-1017:high",
 				parentModel: OTHER_CALLER,
 				inheritParentModel: true,
 			}),
@@ -384,9 +384,9 @@ describe("subagent tool boundary — the resolved model really is what runs", ()
 		async () => {
 			const child = await spawnChild("implement", { provider: "openrouter", id: "xiaomi/mimo-v2.6-flash" });
 
-			expect((readMetaJson(child.sid) as any)?.model).toBe("deepseek/deepseek-v4.1-flash:high");
-			expect(argvModelOf(child.sid), diagnose(child, "argv --model: expected deepseek/deepseek-v4.1-flash:high")).toBe(
-				"deepseek/deepseek-v4.1-flash:high",
+			expect((readMetaJson(child.sid) as any)?.model).toBe("deepseek/deepseek-v4.1-flash-1017:high");
+			expect(argvModelOf(child.sid), diagnose(child, "argv --model: expected deepseek/deepseek-v4.1-flash-1017:high")).toBe(
+				"deepseek/deepseek-v4.1-flash-1017:high",
 			);
 		},
 		120_000,
@@ -406,7 +406,7 @@ describe("subagent tool boundary — the resolved model really is what runs", ()
 			expect(modelsBefore).toContain("xiaomi/mimo-v2.6-flash");
 
 			// Resume from a session whose active model is a different one entirely.
-			const resumedCtx = createCtxStub(process.cwd(), { provider: "openrouter", id: "deepseek/deepseek-v4.1-flash" });
+			const resumedCtx = createCtxStub(process.cwd(), { provider: "openrouter", id: "deepseek/deepseek-v4.1-flash-1017" });
 			const res = await child.tools
 				.get("subagent_resume")
 				.execute("tr", { session_id: child.sid, task: "Reply with the single word: ok" }, undefined, undefined, resumedCtx);

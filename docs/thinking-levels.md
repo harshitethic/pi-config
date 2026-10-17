@@ -21,7 +21,7 @@ articles, vendor API docs (Z.ai, Moonshot, OpenAI, Xiaomi). Research date:
   (`extensions/subagent-async/index.ts` → `buildSubagentArgs`), so every
   subagent inherits the session default (`max`) unless the agent frontmatter's
   `model:` uses the `provider/id:<level>` shorthand (e.g.
-  `deepseek/deepseek-v4.1-flash:high`). The fleet sets effort per agent this
+  `deepseek/deepseek-v4.1-flash-1017:high`). The fleet sets effort per agent this
   way (decision 022, after the 2026-10-01 effort audit: implement/reviewers
   `:high`, scouts `:low`, oracle/orchestrator `:max`, compaction `:low`). The `/fleet-model`
   toggle and its suffix-preserving substitution were deleted 2026-10-01 — one
@@ -115,7 +115,7 @@ GLM per-effort comparisons (see [decision 021](../decisions/subagents/021-effort
 
 ## Addendum — OpenRouter-only, single fleet model (decision 022, 2026-10-01)
 
-- **All seats run `deepseek/deepseek-v4.1-flash`** (orchestrator, implementer, 3
+- **All seats run `deepseek/deepseek-v4.1-flash-1017`** (orchestrator, implementer, 3
   reviewers, 2 scouts, oracle, compaction). The z.ai subscription is gone; the
   `/fleet-model` toggle and `~/.pi/fleet-model.json` override were deleted.
 - **Levels preserved as seat policy, then audited (2026-10-01):** orchestrator/oracle
@@ -147,16 +147,16 @@ GLM per-effort comparisons (see [decision 021](../decisions/subagents/021-effort
 
 ## What this means for current assignments
 
-1. **All seats — `deepseek/deepseek-v4.1-flash` (decision 022).** Effort per seat
+1. **All seats — `deepseek/deepseek-v4.1-flash-1017` (decision 022).** Effort per seat
    via the `provider/model:level` shorthand: implement/reviewers `:high`,
    scouts and compaction `:low`, orchestrator/oracle `:max`. Do not raise
    implement/reviewers toward max — the vendor data says the 60–80 band recovers
    most of max at <half the tokens; `low` is scoped to read-only/summarization seats.
-2. **Orchestrator — `deepseek/deepseek-v4.1-flash:max`.** 021's max-for-the-hard-tail
+2. **Orchestrator — `deepseek/deepseek-v4.1-flash-1017:max`.** 021's max-for-the-hard-tail
    call carries over: the seat owns planning/instructions and the vendor card is
    max-effort. 020's old "complexity is routed by model choice" line is dead —
    there is one model now; the remaining dial is the effort suffix.
-3. **Oracle — `deepseek/deepseek-v4.1-flash:max` (decision 022).** The 0813 record
+3. **Oracle — `deepseek/deepseek-v4.1-flash-1017:max` (decision 022).** The 0813 record
    (020) is superseded: v4.1-flash beats it on Codeforces (3471 vs 3348), MathArena
    Apex (65.6 vs 65.3), DeepSWE (74.2 vs 62.7) and TB2.1 (90.6 vs 87.9), losing only
    text-only HLE (39.1 vs 42.7); HLE-with-tools flips back (63.9 vs 60.0).

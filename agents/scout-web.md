@@ -1,7 +1,7 @@
 ---
 name: scout-web
 description: External research agent — searches the web for current information outside the repo. Use for questions like "find examples of how other compilers implement X", "search for the current API documentation for Y", "find papers or blog posts about optimization Z", "check whether library W supports feature V". NOT for repo-internal questions (use `scout` or the orchestrator's own 1M context), NOT for well-specified implementation (route to `implement`), NOT for mathematical reasoning (route to `math-algo-oracle`).
-model: deepseek/deepseek-v4.1-flash:low
+model: deepseek/deepseek-v4.1-flash-1017:low
 tools: kagi_search, fetch_url, read, grep, find, ls
 ---
 
