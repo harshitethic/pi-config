@@ -5,7 +5,7 @@
  * one is given), so assertions are about the contract, not tfd's registry.
  */
 
-import { afterAll, describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { execFileSync, spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import { mkdtempSync, mkdirSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -94,7 +94,20 @@ function makeRepo(
 
 const ASKS_AB = "docs/reviews/a.md  A1  soon  first\ndocs/reviews/a.md  A2  soon  second\n";
 
+// The extension skips registration under a subagent (index.ts's PI_SUBAGENT_DEPTH
+// guard), and one test spawns a `bun -e` subprocess that inherits the var — so the
+// suite must sanitize it to be green from inside a subagent, where the reviewers
+// run. Snapshot, delete in beforeAll, restore in afterAll (the same pattern as
+// tests/session-log.test.ts and tests/subagent-nesting.test.ts).
+const savedSubagentDepth = process.env.PI_SUBAGENT_DEPTH;
+
+beforeAll(() => {
+	delete process.env.PI_SUBAGENT_DEPTH;
+});
+
 afterAll(() => {
+	if (savedSubagentDepth === undefined) delete process.env.PI_SUBAGENT_DEPTH;
+	else process.env.PI_SUBAGENT_DEPTH = savedSubagentDepth;
 	for (const dir of tmpRoots) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -276,7 +289,11 @@ describe("owner asks: pi extension wiring", () => {
 			ext(pi);
 			await handlers.session_start({}, { cwd: ${JSON.stringify(root)}, hasUI: false, ui: {} });
 		`;
-		const run = spawnSync(process.execPath, ["-e", code], { encoding: "utf8", timeout: 10_000 });
+		// Bun's spawnSync without an explicit env option gives the child the
+		// STARTUP env snapshot — process.env deletions (beforeAll) never reach it,
+		// so pass the live (sanitized) env explicitly or the child's own depth
+		// guard fires and the extension registers no handlers.
+		const run = spawnSync(process.execPath, ["-e", code], { encoding: "utf8", timeout: 10_000, env: { ...process.env } });
 		expect(run.error).toBeUndefined();
 		expect(run.status).toBe(0);
 	}, 30_000);
