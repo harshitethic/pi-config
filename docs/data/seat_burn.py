@@ -698,16 +698,19 @@ def build_report(opts):
     # Per-model solo capacity (illustrative) and the plan-wide meter the console
     # actually enforces: Σ(real $ on model m ÷ listed capacity_m) ≤ 1.0 per month.
     solo_rows = []
-    meter_window = 0.0
+    meter_parts = []
     for model in sorted(m for m, p in PRICES.items() if p.get("listed_limit_usd")):
         price = PRICES[model]
         cap = price["listed_limit_usd"]
         row = model_rows.get((model, GO_PROVIDER)) or _new_row()
-        meter_window += row["burn"] / cap
+        # Rounded per row so the printed `meter part` column adds up to the
+        # printed meter.
+        contribution = round(row["burn"] / cap, 6)
+        meter_parts.append(contribution)
         solo_rows.append({
             "model": model,
             "listed_limit_usd": cap,
-            "meter_contribution": round(row["burn"] / cap, 6),
+            "meter_contribution": contribution,
             "raw_tokens": row["raw"],
             "burn_usd": round(row["burn"], 6),
             "burn_per_day": round(row["burn"] / window_days, 6),
@@ -718,6 +721,7 @@ def build_report(opts):
                                  if price.get(key) is None],
             "limit_source": price["limit_source"],
         })
+    meter_window = round(sum(meter_parts), 6)
     meter_month = meter_window / window_days * 30
     meter_out = {
         "meter_window": round(meter_window, 6),

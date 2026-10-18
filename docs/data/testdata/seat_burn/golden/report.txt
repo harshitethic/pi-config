@@ -53,7 +53,7 @@ deepseek-v4.1-flash                   160        59,151    0.0020 0.000673     0
 glm-5.3-flash                         180         8,650  0.000300 0.000100     0.0030     0.0%    0.000002
 mimo-v2.6-pro                          60             0         0        0          0     0.0%    0.000000 (placeholder price)
 PLAN-WIDE METER  Σ(real $ on model m ÷ solo capacity_m) over the window: 0.000029
-  0.000010/day → month-projected 0.000286 vs 1.0 (0.0% of the shared allowance) → fits
+  0.000010/day → month-projected 0.000290 vs 1.0 (0.0% of the shared allowance) → fits
   self-check: /zen/go/v1/usage monthly percent (plan-wide, no per-model
   breakdown) — footer quota segment, decisions/external-tools/006; this
   tool performs no network I/O. The meter is biased where a price row
@@ -65,7 +65,7 @@ PLAN-WIDE METER  Σ(real $ on model m ÷ solo capacity_m) over the window: 0.000
 session+orchestrator seats = 80.0% of raw tokens, 71.4% of $ burn
   (69,021 raw tokens, $0.0027 list-price burn, $0.000820 as charged by pi [95.1%])
   month-projected at observed pace: $0.0275 vs mimo-v2.6-pro's solo capacity ($60) → fits (0.1% of it)
-  plan-wide meter for these seats: 0.000129 month-projected (0.0% of the allowance, 45.2% of the whole plan meter)
+  plan-wide meter for these seats: 0.000129 month-projected (0.0% of the allowance, 44.5% of the whole plan meter)
 
 == data quality ==
 files scanned: 10 (+0 *.pre-* backups skipped), unreadable: 0, unparseable lines: 0
