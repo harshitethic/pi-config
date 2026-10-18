@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """seat_burn — attribute pi session-log token usage to subagent seats and
-OpenCode Go plan buckets.
+the OpenCode Go plan allowance.
 
 Reads pi session logs (`~/.pi/agent/sessions/**/*.jsonl`) plus the ephemeral
 spawn records `/tmp/pi-subagent-<session-id>.meta.json` and reports, for a UTC
@@ -118,7 +118,8 @@ PRICES = {
         "input": 0.66, "output": 1.98, "cache_read": None, "cache_write": None,
         "peak": None,
         "listed_limit_usd": 60.0,
-        "limit_source": "decisions/subagents/036 (Go Plus solo capacity)",
+        "limit_source": "WO-2026-053 amendment 2026-10-18 (Go Plus solo capacity; "
+                        "supersedes 037's $15 Go-era figure)",
         "source": "decisions/subagents/036 + WO-2026-053 price table (in/out only; no "
                   "cache-read price given — cannot be derived, so unpriced)",
     },
@@ -137,7 +138,8 @@ PRICES = {
         "input": 0.15, "output": 0.50, "cache_read": None, "cache_write": None,
         "peak": None,
         "listed_limit_usd": 180.0,
-        "limit_source": "decisions/subagents/036, 037 (Go Plus solo capacity)",
+        "limit_source": "WO-2026-053 amendment 2026-10-18 (Go Plus solo capacity; "
+                        "supersedes 037's $60 Go-era figure)",
         "source": "decisions/subagents/036 + WO-2026-053 price table (in/out only; no "
                   "cache-read price given — unpriced)",
     },
@@ -156,8 +158,8 @@ PRICES = {
         "peak": None,
         "placeholder": True,
         "listed_limit_usd": 60.0,
-        "limit_source": "decisions/subagents/036; TODO seat-burn entry (Go Plus solo "
-                        "capacity — the watched allowance consumer)",
+        "limit_source": "WO-2026-053 amendment 2026-10-18 + decisions/subagents/036 "
+                        "(the watched allowance consumer)",
         "source": "PLACEHOLDER — Xiaomi/OpenRouter list price (WO-2026-053); the "
                   "OpenCode Go price for this SKU is unknown",
     },
@@ -517,13 +519,19 @@ def scan_sessions(sessions_dir, since, until, q):
     return recs, spellings, routes
 
 
-def peak_multiplier(model, ts):
-    """×2 inside the DeepSeek V4.1 Flash weekday peak windows, else ×1."""
+def peak_multiplier(model, ts, q=None):
+    """×2 inside the DeepSeek V4.1 Flash weekday peak windows, else ×1.
+
+    An unparseable timestamp prices the message off-peak (no invented doubling)
+    and is counted — never a silent ×1.
+    """
     if not PRICES.get(model, {}).get("peak"):
         return 1.0
     try:
         stamp = datetime.datetime.strptime(ts[:19], "%Y-%m-%dT%H:%M:%S")
     except ValueError:
+        if q is not None:
+            q["peak_timestamp_unparsed"] += 1
         return 1.0
     if stamp.weekday() >= 5:
         return 1.0
@@ -618,7 +626,7 @@ def build_report(opts):
         recorded = rec.cost or 0.0
         burn = 0.0
         price = PRICES.get(rec.model)
-        mult = peak_multiplier(rec.model, rec.ts)
+        mult = peak_multiplier(rec.model, rec.ts, q)
         for attr, price_key, _usage_key in CLASSES:
             tokens = getattr(rec, attr)
             if not tokens:
@@ -704,8 +712,9 @@ def build_report(opts):
         cap = price["listed_limit_usd"]
         row = model_rows.get((model, GO_PROVIDER)) or _new_row()
         # Rounded per row so the printed `meter part` column adds up to the
-        # printed meter.
-        contribution = round(row["burn"] / cap, 6)
+        # printed meter (8 dp: at 6 a small contribution loses a meaningful
+        # digit before the sum).
+        contribution = round(row["burn"] / cap, 8)
         meter_parts.append(contribution)
         solo_rows.append({
             "model": model,
@@ -721,12 +730,12 @@ def build_report(opts):
                                  if price.get(key) is None],
             "limit_source": price["limit_source"],
         })
-    meter_window = round(sum(meter_parts), 6)
+    meter_window = round(sum(meter_parts), 8)
     meter_month = meter_window / window_days * 30
     meter_out = {
-        "meter_window": round(meter_window, 6),
-        "meter_per_day": round(meter_window / window_days, 6),
-        "month_projected": round(meter_month, 6),
+        "meter_window": round(meter_window, 8),
+        "meter_per_day": round(meter_window / window_days, 8),
+        "month_projected": round(meter_month, 8),
         "cap": 1.0,
         "cap_use_pct": share(meter_month, 1.0),
         "fits": meter_month <= 1.0,
@@ -820,6 +829,7 @@ def build_report(opts):
             "messages_without_total_tokens": q["no_total_tokens"],
             "total_tokens_mismatch": q["total_mismatch"],
             "bad_timestamps": q["bad_timestamps"],
+            "peak_timestamp_unparsed": q["peak_timestamp_unparsed"],
             "entries_by_type": dict(sorted(q["entries_by_type"].items())),
             "meta_files": q["meta_files"],
             "meta_without_agent": q["meta_without_agent"],
@@ -965,11 +975,11 @@ def render_text(rep):
         add(f"{row['model']:<30}{row['listed_limit_usd']:>11,.0f}{_num(row['raw_tokens']):>14}"
             f"{_usd(row['burn_usd']):>10}{_usd(row['burn_per_day']):>9}"
             f"{_usd(row['month_projected_usd']):>11}{_pct(row['solo_use_pct']):>9}"
-            f"{row['meter_contribution']:>12.6f}{note}")
+            f"{row['meter_contribution']:>12.8f}{note}")
     meter = gp["meter"]
     add(f"PLAN-WIDE METER  Σ(real $ on model m ÷ solo capacity_m) over the window: "
-        f"{meter['meter_window']:.6f}")
-    add(f"  {meter['meter_per_day']:.6f}/day → month-projected {meter['month_projected']:.6f} "
+        f"{meter['meter_window']:.8f}")
+    add(f"  {meter['meter_per_day']:.8f}/day → month-projected {meter['month_projected']:.8f} "
         f"vs 1.0 ({_pct(meter['cap_use_pct'])} of the shared allowance) → "
         f"{'fits' if meter['fits'] else 'EXCEEDS'}")
     add("  self-check: /zen/go/v1/usage monthly percent (plan-wide, no per-model")
@@ -1011,7 +1021,9 @@ def render_text(rep):
         f"{_num(dq['messages_without_usage'])}; "
         f"without totalTokens: {_num(dq['messages_without_total_tokens'])}; "
         f"totalTokens ≠ Σclasses: {_num(dq['total_tokens_mismatch'])}; "
-        f"bad timestamps: {_num(dq['bad_timestamps'])}")
+        f"bad timestamps: {_num(dq['bad_timestamps'])}; "
+        f"peak-window timestamps unparseable (priced off-peak): "
+        f"{_num(dq['peak_timestamp_unparsed'])}")
     if dq["messages_without_provider"]:
         add(f"messages without an envelope provider: "
             f"{_num(dq['messages_without_provider'])} (model_change: "
@@ -1134,7 +1146,7 @@ def main(argv=None):
 # --------------------------------------------------------------------------
 def selftest():
     script = os.path.abspath(__file__)
-    sessions = os.path.join(TESTDATA, "sessions")
+    sessions = os.path.join(TESTDATA, "logs")
     meta = os.path.join(TESTDATA, "meta")
     golden_path = os.path.join(TESTDATA, "golden", "report.txt")
     since, until = "2026-05-01", "2026-05-03"
@@ -1191,7 +1203,10 @@ def selftest():
         # One main-session file, model switched mid-file by a compaction-model
         # change: per-message model attribution, both rows on main-session.
         assert [row["date"] for row in r["daily"]["by_seat"]] == ["2026-05-01"], r["daily"]
-        assert seat_of(r, MAIN_SEAT)["raw_tokens"] == 11100 + 2550 + 11100
+        # The directory also holds a `.pre-*` backup with a distinct entry id and
+        # 999,999 input tokens: if the filter regresses, this count changes.
+        assert r["data_quality"]["files_skipped_pre"] == 1, r["data_quality"]
+        assert seat_of(r, MAIN_SEAT)["raw_tokens"] == 11100 + 2550 + 11100, r["seats"]
         assert sorted(row["model"] for row in r["daily"]["by_model"]) == \
             ["deepseek-v4.1-flash", "glm-5.3-flash"]
         assert model_row(r, "glm-5.3-flash", GO_PROVIDER)["raw_tokens"] == 2550
@@ -1234,9 +1249,10 @@ def selftest():
     def case5():
         r = report(["--sessions-dir", os.path.join(sessions, "case05"),
                     "--meta-dir", meta])
-        # Two distinct entry ids, replayed 3x and 2x: counted once each.
-        assert seat_of(r, MAIN_SEAT)["raw_tokens"] == 110 + 110
-        assert r["data_quality"]["duplicate_ids_dropped"] == 3
+        # Two distinct entry ids, replayed 3x and 2x with *larger* usage on the
+        # later copies: counted once each, and the first copy's usage wins.
+        assert seat_of(r, MAIN_SEAT)["raw_tokens"] == 110 + 110, r["seats"]
+        assert r["data_quality"]["duplicate_ids_dropped"] == 3, r["data_quality"]
 
     case("5 duplicated entry ids counted once", case5)
 
@@ -1268,16 +1284,28 @@ def selftest():
         # ...and the caller-model inheritance rule seats it as orchestrator.
         assert seat_of(r, "orchestrator")["attribution"] == "signature"
 
-    case("7 -1017 checkpoint via openrouter excluded from bucket math", case7)
+    case("7 -1017 checkpoint via openrouter excluded from plan-meter math", case7)
 
     def case8():
         r = report(["--sessions-dir", os.path.join(sessions, "case08"),
                     "--meta-dir", meta])
         assert r["data_quality"]["messages_without_usage"] == 2, r["data_quality"]
-        assert seat_of(r, MAIN_SEAT)["raw_tokens"] == 110
-        assert r["data_quality"]["messages_without_total_tokens"] == 1
+        assert r["data_quality"]["messages_without_total_tokens"] == 1, r["data_quality"]
+        # Tolerated entry types the matrix does not enumerate, counted by type.
+        types = r["data_quality"]["entries_by_type"]
+        assert types["custom"] == 1 and types["custom_message"] == 1, types
+        assert types["session_info"] == 1, types
+        # A model id with no price row: tokens reported, $ burn 0, flagged.
+        row = model_row(r, "claude-x-unknown", "anthropic")
+        assert row["raw_tokens"] == 1100 and row["burn_usd"] == 0, row
+        assert sorted(row["unpriced_classes"]) == ["cache_read", "cache_write",
+                                                   "input", "output"], row
+        # ...and a timestamp unparseable past the day part leaves the peak
+        # multiplication off (counted, not silent).
+        assert r["data_quality"]["peak_timestamp_unparsed"] == 1, r["data_quality"]
+        assert seat_of(r, MAIN_SEAT)["raw_tokens"] == 110 + 1100 + 110, r["seats"]
 
-    case("8 missing/empty usage skipped and counted", case8)
+    case("8 missing/empty usage skipped; unknown entry types/model tolerated", case8)
 
     def case9():
         r = report(["--sessions-dir", os.path.join(sessions, "case09"),
@@ -1286,9 +1314,14 @@ def selftest():
         # (1000*0.15 + 100*0.6 + 10000*0.003)/1e6 = 0.00024, doubled in peak.
         rows = {(row["date"], row["seat"]): row["burn_usd"]
                 for row in r["daily"]["by_seat"]}
-        assert _near(rows[("2026-05-01", MAIN_SEAT)], 0.00048), rows
+        # 2026-05-01 also carries a message with an unparseable timestamp (priced
+        # off-peak, doubled NOT applied): 0.00048 + 0.00024.
+        assert _near(rows[("2026-05-01", MAIN_SEAT)], 0.00048 + 0.00024), rows
         assert _near(rows[("2026-05-02", MAIN_SEAT)], 0.00024), rows
         assert _near(rows[("2026-05-03", MAIN_SEAT)], 0.00024), rows
+        assert _near(r["data_quality"]["peak_timestamp_unparsed"], 1), r["data_quality"]
+        # Plan-wide meter: 0.00120 burn ÷ 160 solo capacity = 7.5e-06.
+        assert _near(r["go_plan"]["meter"]["meter_window"], 7.5e-06), r["go_plan"]["meter"]
 
     case("9 peak ×2 only inside weekday DS-Flash windows", case9)
 
@@ -1326,7 +1359,8 @@ def selftest():
         # Row 12 (real-log smoke run): the default window always covers the
         # newest entry, so it has data whenever the corpus exists at all.
         if not os.path.isdir(DEFAULT_SESSIONS):
-            print("SKIP 12 real-log smoke run (no session logs on this host)")
+            print("SKIP 12 real-log smoke run — NOT a pass: no session logs "
+                  "on this host (matrix row 12 needs the live corpus)")
             return
         proc = subprocess.run([sys.executable, script, "--json"],
                               capture_output=True, text=True)
@@ -1371,6 +1405,14 @@ def selftest():
         text = run(["--sessions-dir", sessions, "--meta-dir", meta,
                     "--since", since, "--until", until]).stdout
         assert f"{data['totals']['raw_tokens']:,}" in text, "text/JSON token mismatch"
+        # $ burn and the plan-wide meter are rendered from these same numbers.
+        assert f"{data['totals']['burn_usd']:.4f}" in text, "text/JSON $ mismatch"
+        meter = data["go_plan"]["meter"]["meter_window"]
+        assert f"{meter:.8f}" in text, "text/JSON meter mismatch"
+        assert f"{data['go_plan']['meter']['month_projected']:.8f}" in text, \
+            "text/JSON month projection mismatch"
+        assert sum(row["meter_contribution"] for row in
+                   data["go_plan"]["solo_capacity"]) - meter < 1e-6
 
     case("JSON mirrors the text numbers", golden_json)
 

@@ -1,0 +1,4 @@
+{"type": "session", "version": 3, "id": "subagent-11111111-2222-3333-4444-555555555504", "timestamp": "2026-05-01T05:00:00.000Z", "cwd": "/tmp/fixture-workspace"}
+{"type": "model_change", "id": "c1", "parentId": null, "timestamp": "2026-05-01T05:00:01.000Z", "provider": "opencode-go", "modelId": "glm-5.3-flash"}
+{"type": "thinking_level_change", "id": "c2", "parentId": null, "timestamp": "2026-05-01T05:00:01.000Z", "thinkingLevel": "high"}
+{"type": "message", "id": "m-a", "parentId": null, "timestamp": "2026-05-01T05:00:02.000Z", "message": {"role": "assistant", "content": [{"type": "text", "text": "ok"}], "api": "openai-completions", "provider": "opencode-go", "model": "glm-5.3-flash", "usage": {"input": 1000, "output": 100, "cacheRead": 5000, "cacheWrite": 0, "reasoning": 0, "totalTokens": 6100}, "stopReason": "stop"}}
