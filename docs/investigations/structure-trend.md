@@ -9,6 +9,35 @@ files unrelated work items all had to touch). Delta-based — no absolute
 thresholds. Each audit runs as `scout-code` over the delta since the previous
 entry; the ranked candidates feed the next chunk's sequence before feature work.
 
+## 2026-10-18 — chunk: seat-burn tracker (WO-2026-053, merge `4e7a00b`)
+
+1 landing: `docs/data/seat_burn.py` (new, 1,397 lines) + 15 committed fixtures
+(`docs/data/testdata/seat_burn/`), plus decision `model-tiers/005` (shared-allowance
+mechanism) and its doc updates. Review: review-code APPROVED_WITH_NOTES, review-tests
+APPROVED (2 rounds).
+
+### Growth
+
+| file | now | base | Δ |
+|---|---:|---:|---:|
+| `docs/data/seat_burn.py` | 1,397 | — | **+1,397** (new) |
+| `docs/data/testdata/seat_burn/**` | 15 files | — | +~275 |
+
+New file lands already large — the flag for the next audit is its *delta*, not the size.
+Ranked extraction candidate if it grows: the price/limit table (the only table in the
+repo that must stay in sync with OpenCode's catalog by hand).
+
+### Unification
+
+- **Price data now exists twice**: `docs/data/seat_burn.py`'s per-class price/limit table
+  vs `docs/data/role_scores.py`'s blended $/M cost axis. Both cite decision records for
+  provenance. If either updates, they drift apart silently — candidate to share one table.
+- **Quota display vs quota projection**: `extensions/footer-session-id.ts` renders the
+  server's plan-wide % (decisions/external-tools/006), `seat_burn.py` projects the same
+  meter from logs. Complementary by design (006's boundary note anticipated this tool);
+  no merge candidate, but the meter formula now lives in two places (`model-tiers/005`
+  and the tool) — the decision is the source of truth.
+
 ## 2026-10-18 — chunk: OpenCode Go usage footer (`d4cd160..` this landing)
 
 1 landing: OpenCode Go plan usage in the footer's provider-quota slot

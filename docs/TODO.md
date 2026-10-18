@@ -1,6 +1,14 @@
 # Seat-burn measurement — MiMo-V2.6-Pro bucket watch (WO-2026-053)
 
-**Status**: scheduled 2026-10-18. Go enforces **one shared weighted allowance**, not per-model
+**Status**: scheduled 2026-10-18; tool landed 2026-10-18 (`docs/data/seat_burn.py`, WO-2026-053,
+merge `4e7a00b`, review-approved; `--meta-dir` fixture seam accepted by orchestrator).
+First data (Oct 17–18, 1.14B raw tokens): **session+orch = 31.7% of tokens, 50.2% of list-$,
+76% of the plan meter**; meter 0.119 in 2 days → 178% month at that pace — but those two days
+were our heaviest ever and ~half the traffic still routed via OpenRouter (excluded from the
+meter). Server cross-check: tool 5.9%/day vs `/zen/go/v1/usage` ≈5.7%/day — agreement.
+Price caveat: GLM-5.3-Flash cache-read unpriced and MiMo-Pro price is a placeholder; pi's
+catalog disagrees with the table by 2.4–3.3× on both — meter is ±2×.
+Go enforces **one shared weighted allowance**, not per-model
 buckets (`model-tiers/005`): plan-wide meter = `Σ real$ ÷ listedLimit ≤ 1`. Fleet at 250M raw
 tokens/day on ~3 heavy days/week (~4–5B/mo) puts ~35%-share session/orch traffic on the
 heaviest-weight model (MiMo-V2.6-Pro, listedLimit $60; per raw token ≈18× GLM-5.3-Flash against
