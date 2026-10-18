@@ -61,4 +61,11 @@ main's verifier caveat (claim spot-verification before items reach the owner que
 claim-heavy adjudications route to the MiMo seat or carry scout math-checks. Watch item:
 GLM-Flash quality on tfd's ~30% narrow tradeoff calls — escalation path `glm-5.3` full.
 
+**Bug-triage peer (2026-10-18):** stays on `glm-5.3-flash` — highest-volume seat (500–900
+msgs/day since Oct 15), Zhipu decorrelation from the DeepSeek implementer it investigates
+(037's axis), proven at role. Fallback if bad root causes surface: `deepseek-v4.1-flash:high`
+(loses decorrelation, cheapest cache). Measurement note: `agents/bug-triage.md` has no
+frontmatter name, so `seat_burn.py` folds triage traffic into the "main-session" bucket —
+the session-tier shares include it until the tool grows path-based attribution.
+
 **Files changed:** this decision, `decisions/subagents/README.md`, `docs/TODO.md`.
