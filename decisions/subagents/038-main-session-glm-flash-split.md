@@ -19,16 +19,22 @@ per raw token against the meter. The session seat was the dominant meter term, s
 to the lightest per-token model on the menu. MiMo-V2.6-Pro stays available as a manual
 per-session choice where its capability is worth the weight.
 
-**Orchestrator split across sessions (owner proposal, endorsed):** with multiple main
-sessions, keep one on MiMo-V2.6-Pro and one on GLM-5.3-Flash. Via [031](README.md) each
-session's orchestrator inherits its caller's model, so the split falls out for free:
+**Orchestrator split across sessions (owner proposal, endorsed):** the main-session default
+(`settings.json`) is now GLM-5.3-Flash; a session can override per-session via `/model`.
+Topology (owner, 2026-10-18): this pi-config session runs GLM-Flash; the **two TFD main
+orchestrator sessions** split one on MiMo-V2.6-Pro, one on GLM-5.3-Flash. Via [031](README.md)
+each session's orchestrator inherits its caller's model, so the split falls out for free:
 
-- **GLM-Flash session** → routine coordination, research dispatch, doc/mechanical
+- **GLM-Flash mains** → routine coordination, research dispatch, doc/mechanical
   orchestration, and everything whose subagents do the heavy lifting (implementers and
   reviewers sit in agent frontmatter regardless of caller).
-- **MiMo-Pro session** → orchestration where the *orchestrator's own* planning/IF reasoning
+- **MiMo-Pro main** → orchestration where the *orchestrator's own* planning/IF reasoning
   is the bottleneck (hard decomposition, math/algo-adjacent work). The
-  `deepseek-v4-pro:max` oracle seat is spawnable from either session.
+  `deepseek-v4-pro:max` oracle seat is spawnable from any session.
+
+The allowance is workspace-wide, so all three mains (plus this one) draw the same meter —
+`seat_burn.py` reads the shared session store and records the model per message, so the
+Oct-21 recheck captures the split's effect automatically.
 
 **Watch:** GLM-5.3-Flash has no measured orchestrator score — 037 picked it for *judging*
 review seats; orchestrator duty is planning/IF. If planning quality dips on the GLM session,
