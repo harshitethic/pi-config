@@ -1,7 +1,7 @@
 ---
 name: review-plan
 description: Pre-implementation plan reviewer. Catches plan defects before delegation to implementer agents — wrong file hints, broken integration contracts, missing scope, weak reference patterns, unflagged risks. Use when a planned task touches more than 3 files, involves IR invariants or type system changes, or when the orchestrator is uncertain about file hint accuracy. Reads project docs (AGENTS.md, glossary, design docs, decisions) at review time to apply the project's terminology and design priorities. Read-only tools only. Do NOT use to review completed code — use review-code for that.
-model: xiaomi/mimo-v2.6-flash:high
+model: opencode-go/glm-5.3-flash:high
 tools: read, grep, find, ls
 ---
 

@@ -5,15 +5,9 @@
         "deepseek/deepseek-v4.1-flash-1017": {
           "compat": {
             "openRouterRouting": {
-              "only": ["deepseek"],
-              "allow_fallbacks": false
-            }
-          }
-        },
-        "xiaomi/mimo-v2.6-flash": {
-          "compat": {
-            "openRouterRouting": {
-              "only": ["Xiaomi"],
+              "only": [
+                "deepseek"
+              ],
               "allow_fallbacks": false
             }
           }

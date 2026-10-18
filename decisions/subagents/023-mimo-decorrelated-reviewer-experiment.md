@@ -31,6 +31,27 @@ Decision rule: **keep** if verdicts are clean and cost/wall-clock improve; **try
 
 **2026-10-16:** decision 033 tightened the review gate mid-experiment; verdicts after it are not comparable with the 2026-10-01..16 window. The WO-153/154 control replays use the pre-033 prompts.
 
+## Evidence (interim, 2026-10-16 — no ruling yet)
+
+**Production window (2026-10-01..15, 223 MiMo reviewer sessions):** $7.49 total vs $17.50 for the same tokens at DeepSeek's observed rates (~57% cheaper). 47% of sessions hit ≥1 errored turn (2.6% of turns; DS 0.3%), almost all `terminated`; sampled generations were all served by Xiaomi and completed upstream, so the cut is between OpenRouter and pi (pi's own timers are off — `httpIdleTimeoutMs: 0`; undici's `cause` is dropped). No fabricated citations recorded. True positive: type-ctor D3 HIGH (10-05). Misses: WO-153 (audit A1/A2), WO-154 (five gates vs one allowed, AOT miscompile later fixed by WO-197), WO-143 (bare negative claim) — both seats approved each.
+
+**Control replay.** Each model reviewed the *landed* WO-153 and WO-154 states (code + tests seats, pre-033 prompts, original dispatch text plus a note that round-1 evidence paths may be stale — which pushes every reviewer to re-run rather than audit logs; the original reviews audited live logs). One run per cell. DS and MiMo Flash via OpenRouter first-party pins; GLM-5.3-Flash, MiMo V2.6 Pro and Claude Haiku 5.5 via OpenCode Go.
+
+| | DeepSeek V4.1 Flash | GLM-5.3-Flash | MiMo Flash (rerun) | MiMo V2.6 Pro | Claude Haiku 5.5 |
+|---|---|---|---|---|---|
+| WO-153 code / tests | approve / approve | approve / **reject** | approve / **reject** | approve / **reject** | **reject** / **reject** |
+| WO-154 code / tests | **reject** / **reject** | **reject** / **reject** | **reject** / **reject** | **reject** / **reject** | **reject** / **reject** |
+| AOT miscompile (✔) | code only | both | both | code only | both |
+| Unique confirmed finds | vacuous row 11 ✔ | — | — | duplicate-edge gate (also Haiku; unverified) | rename-collision wrong output ✔ (fixed since), shadowed-param verifier error ✔ (live, WO-154 regression), generic multi-instance verifier error ✔ (live, pre-existing) |
+| Audit C6 flagged | M | M | L | H | M |
+| Mean wall-clock | 23 min | 31 min | 30 min | 22 min | 12 min* |
+| Cost, 4 reviews | $0.20 | $0.36 | $0.14 | $0.28 | $0.93 |
+| Errored turns | 1 | 0 | 2 | 1 | 0 |
+
+✔ = verified by the orchestrator. *Haiku ran alone in the last wave (less machine contention). Costs for Go models are pi's catalog estimates, which count against Go's per-model dollar limits. Nobody found audit A1 (O2/O0 transport split). Every reviewer rated the 8→9 LUR re-baseline LOW–MEDIUM, never blocking (033 now makes it HIGH). The three live/landed bugs were handed to bug-triage.
+
+**Reading so far:** under identical conditions MiMo Flash matched DeepSeek and GLM-5.3-Flash on these two work orders, so the production misses look driven by review conditions (auditing implementer logs; required lanes not run) and the gate wording (033), more than by the model. Haiku 5.5 found three confirmed defects no other model found, at ~3–5× the cost. Two work orders, one sample per cell: a smell test.
+
 ## Risks / tradeoffs
 
 - **`review-code` is the highest-stakes seat and MiMo Flash is the series' weakest coding row** (BenchLM coding rank #38, 49.8 index; composite carried by agentic/knowledge rows). Main risk, accepted knowingly; revert on missed defects.
@@ -47,3 +68,8 @@ Decision rule: **keep** if verdicts are clean and cost/wall-clock improve; **try
 **Files changed:** `agents/review-code.md`, `agents/review-plan.md`, `agents/review-tests.md`, `APPEND_SYSTEM.md` (temporary verdict-checking note), `models.json` (MiMo first-party pin), `docs/model-role-scores.md`, `docs/thinking-levels.md`, `docs/TODO.md`, `README.md`, decisions index, this decision.
 
 **Test coverage:** none — agent frontmatter + routing config. Verified by real dispatch: `review-tests` and `review-code` both smoke-spawned on the pinned MiMo route (meta.json model confirmed, correct tool use, 4 turns each, ~20–27% cheaper than the DS equivalent on the same tiny task); live signal comes from the next real work-order round.
+
+> **Superseded 2026-10-18 ([decision 037](037-reviewer-oracle-repick.md)):** the review tier moved
+> to `opencode-go/glm-5.3-flash:high` — Zhipu lab, decorrelation axis preserved, but the
+> Xiaomi-lab premise and the `models.json` MiMo pin are gone. This file remains the record
+> of the experiment design and why reviewer-tier decorrelation from the implementer matters.

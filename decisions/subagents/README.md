@@ -43,3 +43,4 @@ date: 2026-07-14
 | 034 | Spec authority — only the owner changes a work order's mechanism, rejected alternatives or acceptance rows; a falsified premise stops the run | active |
 | 035 | Fleet model id → `deepseek/deepseek-v4.1-flash-1017` (Oct 17 checkpoint; pin + store hand-merge) | done |
 | 036 | DeepSeek fleet rides the OpenCode Go plan quota (`opencode-go/deepseek-v4.1-flash`; V4 Pro-style $15 buckets avoided) | done |
+| 037 | Reviewers → `opencode-go/glm-5.3-flash:high` (023 experiment superseded); oracle → `opencode-go/deepseek-v4-pro:max` | done |
