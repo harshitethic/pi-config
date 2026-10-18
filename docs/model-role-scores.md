@@ -131,9 +131,15 @@ free previews have no BenchLM rows). Halluc% = AA-Omniscience hallucination rate
 
 Sub-3-point gaps are noise (harness variance — Anthropic's infrastructure-noise
 study moved TB2.0 scores by 6 points on resource config alone). Seat-repick
-rulings pending (2026-10-18 discussion, owner): reviewer migration off
-MiMo-V2.6-Flash; implementer/orchestrator re-evaluation. Do not treat the
-composite as a decision — the gaps that matter here are >10 points.
+rulings landed 2026-10-18 ([subagents/037](../decisions/subagents/037-reviewer-oracle-repick.md)):
+reviewers → `opencode-go/glm-5.3-flash`, oracle → `opencode-go/deepseek-v4-pro`,
+implementer stays on DeepSeek V4.1 Flash. Do not treat the composite as a
+decision — the gaps that matter here are >10 points.
+
+**Cost evaluation is monthly-cap-only** (owner ruling, [model-tiers/004](../decisions/model-tiers/004-monthly-cap-only-cost-metric.md)):
+compare effective monthly volume (monthly $ bucket ÷ blended $/M burn rate) and
+nothing else. The req/5h column is informational — never a cost input, never
+converted into monthly-equivalents.
 
 ---
 

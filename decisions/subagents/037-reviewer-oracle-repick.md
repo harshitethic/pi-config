@@ -41,6 +41,10 @@ reviewers → GLM-5.3-Flash $60/mo; oracle → DS V4 Pro $15/mo (Plus); user ses
 orchestrators → owner's choice (step-5 trial, $60/mo bucket). No $15-trap collision
 except the oracle's, which is volume-appropriate.
 
+> **Note (2026-10-18, [model-tiers/004](../model-tiers/004-monthly-cap-only-cost-metric.md)):** cost is
+> evaluated on monthly caps only; the request-rate figures above are informational, and rate-cap
+> tiebreakers in this rationale carry zero weight going forward.
+
 **Supersedes:** 023's Xiaomi-lab reviewer experiment (the decorrelation axis is
 preserved — Zhipu vs DeepSeek — but the Xiaomi premise and its `models.json` pin
 are gone); 036's oracle seat (V4.1 Flash → V4 Pro).
