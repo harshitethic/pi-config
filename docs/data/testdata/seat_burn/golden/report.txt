@@ -52,6 +52,7 @@ capacity_m) ≤ 1.0 — the per-model figure is what one model alone could consu
 model                          solo cap $    raw tokens    $ burn    $/day month proj solo use  meter part
 deepseek-v4-pro                        60        11,100    0.0011 0.000359     0.0108     0.0%  0.00001797
 deepseek-v4.1-flash                   160        70,361    0.0023 0.000760     0.0228     0.0%  0.00001425
+glm-5.3                               120             0         0        0          0     0.0%  0.00000000
 glm-5.3-flash                         180         8,650  0.000510 0.000170     0.0051     0.0%  0.00000283
 mimo-v2.6-pro                          60             0         0        0          0     0.0%  0.00000000
 PLAN-WIDE METER  Σ(real $ on model m ÷ solo capacity_m) over the window: 0.00003505
@@ -110,7 +111,7 @@ deepseek-v4-flash-0731         0.14   0.28   0.0028  unknown unknown           �
 deepseek-v4-pro                0.66   1.98    0.022  unknown      ×2          60
 deepseek-v4.1-flash            0.15    0.6    0.003  unknown      ×2         160
 deepseek-v4.1-flash-1017       0.15    0.6    0.003  unknown      ×2           —
-glm-5.3                         1.4    4.4     0.26  unknown unknown           —
+glm-5.3                         1.4    4.4     0.26  unknown unknown         120
 glm-5.3-flash                  0.15    0.5     0.03  unknown unknown         180
 mimo-v2.5-pro                 0.435   0.87 0.003625  unknown unknown           —
 mimo-v2.6-flash                0.14   0.28   0.0028  unknown unknown           —
@@ -124,6 +125,7 @@ minimax-m3                      0.3    1.2     0.06  unknown unknown           �
     solo capacity $160/mo: decisions/subagents/036 (Go Plus solo capacity)
   deepseek-v4.1-flash-1017: decisions/subagents/035 (1017 checkpoint: pricing unchanged from the 0910 id, weekday peak windows unchanged)
   glm-5.3: opencode.ai/v2/docs/console/go/ table (fetched 2026-10-18); in/out per 036
+    solo capacity $120/mo: qcode.cc Go guide (updated 2026-10-15) — third-party single-source; the 038 promotion path's ceiling
   glm-5.3-flash: opencode.ai/v2/docs/console/go/ table (fetched 2026-10-18); in/out per 036 — cache-read $0.03 confirmed by exact match with pi-recorded $ on the 2026-10-17 window
     solo capacity $180/mo: WO-2026-053 amendment 2026-10-18 (Go Plus solo capacity; supersedes 037's $60 Go-era figure)
   mimo-v2.5-pro: opencode.ai/v2/docs/console/go/ table (fetched 2026-10-18); matches the OpenRouter row in 010

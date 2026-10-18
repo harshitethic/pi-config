@@ -34,7 +34,8 @@ PAYG fallback — consider enabling that fallback in the console before a heavy 
 per-session). Recheck instead ~2026-10-21 with `--since 2026-10-19` (first full days on the
 new seat): compare session meter share vs the pre-flip 76%; the thresholds above are
 discharged by the flip — the open question is whether GLM-Flash holds the planning/orch
-seat (no measured Orch score; promotion path `glm-5.3`, listed limit unrecorded).
+seat (no measured Orch score; promotion path `glm-5.3` — Go Plus solo limit $120 per
+qcode.cc 2026-10-15, third-party single-source).
 ---
 
 # Experiment — MiMo V2.6 Flash as the decorrelated reviewer tier (decision 023)

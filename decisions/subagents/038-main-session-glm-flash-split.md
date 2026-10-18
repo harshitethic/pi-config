@@ -44,9 +44,10 @@ Oct-21 recheck captures the split's effect automatically.
 
 **Watch:** GLM-5.3-Flash has no measured orchestrator score — 037 picked it for *judging*
 review seats; orchestrator duty is planning/IF. If planning quality dips on the GLM session,
-the promotion path is `glm-5.3` (full). Its Go Plus listed limit is unrecorded
-(`seat_burn.py` price table has no solo-capacity row) — resolve via the OpenCode support
-email already queued (Go Plus plan-wide constant, GLM-Flash cache-read price, MiMo-Pro price).
+the promotion path is `glm-5.3` (full). Its Go Plus solo limit is **$120**
+(qcode.cc, updated 2026-10-15 — third-party single-source). The support email's remaining
+open items are now just the Go Plus plan-wide constant and confirmation of the Plus
+per-model figures (prices resolved from the console docs table, `model-tiers/005`).
 
 **Measurement:** the TODO recheck now measures the post-flip mix — run
 `python3 docs/data/seat_burn.py --since 2026-10-19` (first full days on the new seat) and

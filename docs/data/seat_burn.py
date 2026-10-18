@@ -150,6 +150,9 @@ PRICES = {
     "glm-5.3": {
         "input": 1.40, "output": 4.40, "cache_read": 0.26, "cache_write": None,
         "peak": None,
+        "listed_limit_usd": 120.0,
+        "limit_source": "qcode.cc Go guide (updated 2026-10-15) — third-party "
+                        "single-source; the 038 promotion path's ceiling",
         "source": "opencode.ai/v2/docs/console/go/ table (fetched 2026-10-18); in/out per 036",
     },
     "mimo-v2.6-flash": {

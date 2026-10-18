@@ -33,9 +33,20 @@ not a sliding window. The quote's worked example pins the weighting: "$1 of GLM-
 usage uses the same share of your allowance as $0.25 of Kimi K3 usage" (= 60/15).
 
 **Provenance gap:** the Go *Plus* per-model figures (160/180/60/60) are console-researched
-(WO-2026-053 scout), not independently re-verifiable; the docs' limit column ($80/60/15/15)
-is the **Go** plan. Seat conclusions only need the GLM/MiMo limit ratio ≥ 1.76 (scout: 3×,
-docs column: 4× — both safe); a true ratio < 1.76 would flip the per-token meter ranking.
+(WO-2026-053 scout). Web research 2026-10-18: qcode.cc's Go guide (updated 2026-10-15)
+corroborates DS-Flash $160 and adds Kimi K3 $60, Qwen3.8 Max $60, **GLM-5.3 (full) $120**
+(the promotion path ceiling — was wrongly "unrecorded" in 038/TODO). Multipliers are
+non-uniform by design (2×/4×/8×; OpenCode: bulk discounts + reserved GPU capacity make
+higher limits possible; already-discounted public pricing gets lower). The scout's GLM-Flash
+$180 / MiMo-Pro $60 / DS-Pro $60 fit the pattern but stay single-sourced. Limits are
+volatile (OpenCode: "usage limits may change as it learns from early usage"). Third-party
+guides (qcode, bitdoze) read the docs as per-model budgets — the misleading presentation
+the GitHub issue calls out; the shared-weighted mechanism rests on the support quote +
+console source, which outrank them. The docs' limit column ($80/60/15/15) is the **Go**
+plan. Seat conclusions only need the GLM/MiMo limit ratio ≥ 1.76 (scout: 3×, docs column:
+4× — both safe); a true ratio < 1.76 would flip the per-token meter ranking. Also:
+DeepSeek ZDR agreement runs through 2026-10-31 (renewed monthly) — DS-seat data-retention
+terms change if it lapses.
 
 **What this corrects:**
 - 036's "three separate buckets" and any additive headroom arithmetic (including
