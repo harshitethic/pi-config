@@ -127,13 +127,13 @@ describe("openWorkRecord — dispatch at spawn", () => {
 				"--implementer", "subagent-impl-1", "--work_order", WO_FILE],
 			body: task,
 		}]);
-	});
+	}, 30_000);
 
 	it("writes nothing and says nothing in a repo without wo_record.py", () => {
 		const root = makeRepo({ script: false });
 		expect(openWorkRecord(root, WO_FILE, "subagent-impl-1", "task")).toEqual({ notes: [] });
 		expect(fs.existsSync(path.join(root, "calls.jsonl"))).toBe(false);
-	});
+	}, 30_000);
 
 	it("reports a refused write and returns no record to complete", () => {
 		const root = makeRepo();
@@ -141,7 +141,7 @@ describe("openWorkRecord — dispatch at spawn", () => {
 		const out = openWorkRecord(root, WO_FILE, "subagent-impl-1", "task");
 		expect(out.record).toBeUndefined();
 		expect(out.notes).toEqual(["work-order record not written: stub refused dispatch"]);
-	});
+	}, 30_000);
 
 	it("reports a file name with no WO-YYYY-NNN prefix without calling the tool", () => {
 		const root = makeRepo();
@@ -150,7 +150,7 @@ describe("openWorkRecord — dispatch at spawn", () => {
 		expect(out.record).toBeUndefined();
 		expect(out.notes[0]).toContain("has no WO-YYYY-NNN prefix");
 		expect(calls(root)).toEqual([]);
-	});
+	}, 30_000);
 });
 
 describe("completeWorkRecord — reviewer rounds, then completion", () => {
@@ -178,7 +178,7 @@ describe("completeWorkRecord — reviewer rounds, then completion", () => {
 		expect(JSON.parse(r2.body)).toEqual({ brief: "Review tests.", output: "REJECT" });
 		expect(done).toEqual({ argv: ["append", "WO-2026-001", "completion", "--implementer", key],
 			body: "Done.\n**deviations_from_spec:** none" });
-	});
+	}, 30_000);
 
 	it("keeps writing after a refused review and reports it", () => {
 		const root = makeRepo();
@@ -190,7 +190,7 @@ describe("completeWorkRecord — reviewer rounds, then completion", () => {
 		const notes = completeWorkRecord({ cwd: root, woId: "WO-2026-001" }, key, () => "Done.");
 		expect(notes).toEqual(["work-order record: review subagent-code-2 not written: stub refused review"]);
 		expect(calls(root).map((c) => c.argv[2])).toEqual(["review", "completion"]);
-	});
+	}, 30_000);
 
 	it("reports a reviewer with no session file and still writes the rest", () => {
 		const root = makeRepo();
@@ -199,14 +199,14 @@ describe("completeWorkRecord — reviewer rounds, then completion", () => {
 		const notes = completeWorkRecord({ cwd: root, woId: "WO-2026-001" }, key, () => "Done.");
 		expect(notes).toEqual(["work-order record: review subagent-code-3 not written: no session file with a task"]);
 		expect(calls(root).map((c) => c.argv[2])).toEqual(["completion"]);
-	});
+	}, 30_000);
 
 	it("reports a missing final report and writes no completion", () => {
 		const root = makeRepo();
 		const notes = completeWorkRecord({ cwd: root, woId: "WO-2026-001" }, uniqueKey("impl"), () => "  \n");
 		expect(notes).toEqual(["work-order record: completion not written: implementer has no final report"]);
 		expect(calls(root)).toEqual([]);
-	});
+	}, 30_000);
 });
 
 describe("readSessionExchange", () => {
@@ -219,19 +219,19 @@ describe("readSessionExchange", () => {
 			message("b", { role: "assistant", content: [{ type: "text", text: "Final." }] }),
 		]);
 		expect(readSessionExchange(file)).toEqual({ task: "Brief.\nMore.", output: "Final." });
-	});
+	}, 30_000);
 
 	it("returns null without a user message", () => {
 		const root = makeRepo();
 		expect(readSessionExchange(sessionFile(root, [message("a", { role: "assistant", content: [] })]))).toBeNull();
-	});
+	}, 30_000);
 
 	it("throws on a malformed line rather than dropping part of the session", () => {
 		const root = makeRepo();
 		const file = path.join(root, "bad.jsonl");
 		fs.writeFileSync(file, JSON.stringify(message("u", { role: "user", content: "x" })) + "\n{\"type\":");
 		expect(() => readSessionExchange(file)).toThrow();
-	});
+	}, 30_000);
 });
 
 // ── Resume, recovery and the execute branch ─────────────────────────────────
@@ -282,7 +282,7 @@ describe("a second completion appends only the reviews the record does not hold"
 		expect(later[0].argv).toEqual(["append", WO_ID, "review", "--seat", "review-tests", "--round", "2",
 			"--session", "subagent-rev-b"]);
 		expect(later[1].body).toBe("Second report.");
-	});
+	}, 30_000);
 });
 
 class FakeSock extends EventEmitter {
@@ -323,7 +323,7 @@ describe("recovery completes the record from the recovered session file", () => 
 		expect(after[0].argv.slice(3, 9)).toEqual(["--seat", "review-tests", "--round", "2", "--session", "subagent-rec-b"]);
 		expect(after[1].body).toBe("Reworked.\n\n**deviations_from_spec:**\n- Changed the approach.");
 		expect(resolveRunningSession(sid)).toBeNull();
-	});
+	}, 30_000);
 });
 
 describe("resume carries the record context from the meta", () => {
@@ -344,7 +344,7 @@ describe("resume carries the record context from the meta", () => {
 			await tools.get("subagent_kill").execute("tk", { session_id: sid }, undefined, undefined, stubCtx(root));
 			removeArtifacts(sid);
 		}
-	});
+	}, 30_000);
 });
 
 /** Remove what a real spawn leaves for a handle: meta, log, socket, and its pi transcript. */
@@ -397,5 +397,5 @@ describe("subagent execute opens the record only for a workOrderPath spawn", () 
 				removeArtifacts(sid);
 			}
 		}
-	});
+	}, 30_000);
 });

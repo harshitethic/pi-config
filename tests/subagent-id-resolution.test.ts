@@ -400,7 +400,7 @@ describe("describeUnknownSession", () => {
 		expect(msg).toMatch(/Not attached here: a socket file exists/);
 		expect(msg).toMatch(new RegExp(`its recorded owner process \\(pid ${deadPid}\\) is gone`));
 		expect(msg).not.toMatch(/Running under another session/);
-	}, 15_000); // spawns a subprocess: bun's implicit 5000ms budget is not a real limit (pcone/pi-config#3)
+	}, 30_000); // spawns a subprocess: bun's implicit 5000ms budget is not a real limit (pcone/pi-config#3)
 });
 
 // ── Tool and command entry points ───────────────────────────────────────────

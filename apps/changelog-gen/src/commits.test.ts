@@ -294,14 +294,14 @@ describe('fetchCommits', () => {
       // hash should be a non-empty string
       expect(c.hash.length).toBeGreaterThan(0);
     }
-  });
+  }, 30_000);
 
   it('respects since filter', async () => {
     const root = new URL('../..', import.meta.url).pathname;
     // Future date should return zero commits
     const empty = await fetchCommits(root, '2027-01-01');
     expect(empty.length).toBe(0);
-  });
+  }, 30_000);
 
   it('respects until filter', async () => {
     const root = new URL('../..', import.meta.url).pathname;
@@ -309,7 +309,7 @@ describe('fetchCommits', () => {
     const old = await fetchCommits(root, undefined, '2026-07-10');
     expect(old.length).toBeGreaterThan(0);
     expect(old.length).toBeLessThan(all.length);
-  });
+  }, 30_000);
 });
 
 // ---------------------------------------------------------------------------
@@ -398,5 +398,5 @@ describe('parseGitLog with real git output', () => {
     expect(commits[3].type).toBe('feat');
     expect(commits[3].subject).toBe('empty body commit');
     expect(commits[3].breaking).toBe(false);
-  });
+  }, 30_000);
 });

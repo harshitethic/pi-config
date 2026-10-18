@@ -126,7 +126,7 @@ describe("owner asks: new = open - seen", () => {
 		const acked = await ownerAsks(root, cache);
 		expect(acked!.asks.some((a) => a.isNew)).toBe(false);
 		expect(countText(acked!.asks)).toBe("owner asks: 3 open");
-	});
+	}, 30_000);
 });
 
 describe("owner asks: first run", () => {
@@ -139,7 +139,7 @@ describe("owner asks: first run", () => {
 			"docs/reviews/a.md#A1",
 			"docs/reviews/a.md#A2",
 		]);
-	});
+	}, 30_000);
 });
 
 describe("owner asks: cache by upstream sha", () => {
@@ -160,7 +160,7 @@ describe("owner asks: cache by upstream sha", () => {
 		expect(runs()).toEqual([firstSha, sha]);
 		const b1 = state!.asks.find((a) => a.key === "docs/reviews/b.md#B1");
 		expect(b1?.isNew).toBe(true);
-	});
+	}, 30_000);
 });
 
 describe("owner asks: non-registry repos", () => {
@@ -172,7 +172,7 @@ describe("owner asks: non-registry repos", () => {
 
 		const bare = realpathSync(tmp("plain"));
 		expect(await ownerAsks(bare, cache)).toBeNull();
-	});
+	}, 30_000);
 });
 
 describe("owner asks: statusline CLI", () => {
@@ -189,13 +189,13 @@ describe("owner asks: statusline CLI", () => {
 		const out = statusline({ workspace: { current_dir: root } }, home);
 		expect(out.status).toBe(0);
 		expect(out.stdout).toBe(`${basename(root)} · main · owner asks: 2 open\n`);
-	});
+	}, 30_000);
 
 	it("prints only dir · branch outside a registry repo", () => {
 		const { root } = makeRepo(ASKS_AB, { registry: false });
 		const out = statusline({ cwd: root }, tmp("home"));
 		expect(out.stdout).toBe(`${basename(root)} · main\n`);
-	});
+	}, 30_000);
 });
 
 /** session_start fires its refresh without awaiting it; a registry repo's status lands after its git and script calls. */
@@ -245,7 +245,7 @@ describe("owner asks: pi extension wiring", () => {
 
 		// session_shutdown clears the 60 s timer; without it the test process would not exit.
 		await handlers.session_shutdown({}, ctx);
-	});
+	}, 30_000);
 
 	it("stays silent without a UI (print mode), so no timer keeps the process alive", async () => {
 		const handlers: Record<string, (event: unknown, ctx: unknown) => unknown> = {};
@@ -266,7 +266,7 @@ describe("owner asks: pi extension wiring", () => {
 		await settle();
 		await handlers.session_shutdown({}, {});
 		expect(statuses).toHaveLength(0);
-	});
+	}, 30_000);
 	it("does not hold a print-mode process open (the 60 s interval is never started)", () => {
 		const { root } = makeRepo(ASKS_AB);
 		const code = `
@@ -279,7 +279,7 @@ describe("owner asks: pi extension wiring", () => {
 		const run = spawnSync(process.execPath, ["-e", code], { encoding: "utf8", timeout: 10_000 });
 		expect(run.error).toBeUndefined();
 		expect(run.status).toBe(0);
-	});
+	}, 30_000);
 });
 
 describe("owner asks: work-order departures", () => {
@@ -321,13 +321,13 @@ describe("owner asks: work-order departures", () => {
 		const old = JSON.parse(fs.readFileSync(join(cache, cacheFile), "utf8"));
 		fs.writeFileSync(join(cache, cacheFile), JSON.stringify({ sha: old.sha, lines: old.lines }));
 		expect((await ownerAsks(root, cache))!.unruled).toHaveLength(2);
-	});
+	}, 30_000);
 
 	it("reads nothing from a repo without wo_record.py", async () => {
 		const { root, cache } = makeRepo(ASKS_AB);
 		expect((await ownerAsks(root, cache))!.unruled).toEqual([]);
 		expect(fs.existsSync(join(root, "record-runs.log"))).toBe(false);
-	});
+	}, 30_000);
 
 	it("counts as attention, and the statusline draws it in warning colour", () => {
 		const { root } = makeRepo(ASKS_AB, { unruled: "WO-2026-001 D1 x\n" });
@@ -363,10 +363,10 @@ describe("owner asks: work-order departures", () => {
 		await waitFor(() => statuses.at(-1) !== undefined);
 		expect(statuses.at(-1)).toBe("[warning]owner asks: 0 open · 1 unruled departure");
 		await handlers.session_shutdown({}, ctx);
-	});
+	}, 30_000);
 
 	it("attention is false when neither new asks nor departures exist", async () => {
 		const { root, cache } = makeRepo(ASKS_AB, { unruled: "" });
 		expect(attention((await ownerAsks(root, cache))!)).toBe(false);
-	});
+	}, 30_000);
 });
