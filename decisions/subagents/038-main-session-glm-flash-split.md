@@ -49,4 +49,16 @@ share >20% of tokens or projected meter >70% → move the seat) are discharged b
 the open question shifts from "is the fleet sustainable" to "does GLM-Flash hold the
 planning seat".
 
+**Seat assignment (2026-10-18, delegated by owner — both TFD mains answered a workload
+questionnaire):** the **tfd mainline-integrator session switches to GLM-5.3-flash** — ~70%
+routing/dispatch/bookkeeping (gate merges, probe verification, peer routing, WO drafting +
+queue sequencing), no owned design. The **tfd-d session keeps MiMo-V2.6-Pro** — it owns the
+week's decomposition islands (44-site C8/C9 conversion, phase-C checker re-write) and gates
+algorithmic compiler diffs (WO-211 switch lowering, 212 tail-graph keys, 214 arena escape,
+215 arena-table oracle), where a weak gate silently passes a miscompile; its own conditional
+("if the other seat's week is triage churn, give it GLM") matched. Mitigation for the tfd
+main's verifier caveat (claim spot-verification before items reach the owner queue):
+claim-heavy adjudications route to the MiMo seat or carry scout math-checks. Watch item:
+GLM-Flash quality on tfd's ~30% narrow tradeoff calls — escalation path `glm-5.3` full.
+
 **Files changed:** this decision, `decisions/subagents/README.md`, `docs/TODO.md`.
