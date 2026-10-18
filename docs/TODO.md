@@ -1,3 +1,21 @@
+# Seat-burn measurement — MiMo-V2.6-Pro bucket watch (WO-2026-053)
+
+**Status**: scheduled 2026-10-18. Fleet at 250M raw tokens/day on ~3 heavy days/week (~4–5B/mo)
+fits every Go Plus bucket except possibly **MiMo-V2.6-Pro** ($60/mo ≈ 1.1B raw tokens at observed
+mix — 97% of usage is cache-read and MiMo-Pro's cache price is the worst fit). Your session +
+all orchestrators ride that bucket via 031 inheritance; their share of fleet tokens is currently
+an estimate (~25–35%, remapped from historical GLM traffic). Owner ruling 2026-10-18: setup
+stays as-is; re-measure after ~2 days of current-seat usage. **Recheck ~2026-10-20**:
+`python3 docs/data/seat_burn.py --since 2026-10-17` (tool: WO-2026-053). If session+orch share
+> ~20% of raw tokens or month-projected burn > $60, options: session/orch → `glm-5.3-flash`
+(~$0.008/M observed, shares the reviewers' $180 bucket) or `glm-5.3` ($120). Parked alongside:
+decision-004's 95/5 blended-rate assumption is ~3.4× too pessimistic for the cache-cheap DS/GLM
+buckets but near-accurate for MiMo-Pro — recalibration decision waits for the measurement.
+Other watch: OpenRouter credits nearly dry ($511.98 used of $530) — the `-1017` fidelity escape
+hatch is decorative until topped up. Unknown recorded nowhere: what a Go bucket does at
+exhaustion (throttle vs hard stop) — ask OpenCode before a heavy month, not during one.
+---
+
 # Experiment — MiMo V2.6 Flash as the decorrelated reviewer tier (decision 023)
 
 **Status**: running 2026-10-01. All three review seats (`review-code`, `review-plan`,
