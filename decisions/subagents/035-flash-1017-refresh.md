@@ -26,7 +26,9 @@ date: 2026-10-18
 > and DeepSeek's first-party `deepseek-flash` API name was upgraded in place to the 1017
 > checkpoint, the old id is expected to serve the new checkpoint automatically — do NOT flip
 > scout-sweep to the `-1017` slug; re-probe `deepseek-v4.1-flash` instead. The catalog hand-merge
-> stays in place but is dormant for this seat.
+> stays in place but is dormant for this seat. **Update same day: `scout-sweep` deleted by owner** — it was an uncommitted
+> cost-tier twin of scout-code (identical body, OpenCode Go frontmatter); with it gone, the
+> OpenCode Go ruling above is dormant until a cost-tier seat exists again.
 
 **Tradeoff:** one more hand-maintained pin plus one hand-merged catalog entry. When the upstream catalog catches up, `pi update --models` rewrites the merged entry from OpenRouter's live data (the merge is a stopgap against the store's own `lastModified` freshness signal, not a fork of it) — a later re-merge should only be needed if prices change upstream.
 
