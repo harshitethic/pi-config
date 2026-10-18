@@ -1,0 +1,2 @@
+{"type": "session", "version": 3, "id": "aaaa0001-0000-0000-0000-000000000001", "timestamp": "2026-05-01T02:00:00.000Z", "cwd": "/tmp/fixture-workspace"}
+{"type": "message", "id": "backup-only-id", "parentId": null, "timestamp": "2026-05-01T02:01:00.000Z", "message": {"role": "assistant", "content": [{"type": "text", "text": "ok"}], "api": "openai-completions", "provider": "opencode-go", "model": "deepseek-v4.1-flash", "usage": {"input": 999999, "output": 99999, "cacheRead": 999999, "cacheWrite": 0, "reasoning": 0, "totalTokens": 2099997}, "stopReason": "stop"}}
