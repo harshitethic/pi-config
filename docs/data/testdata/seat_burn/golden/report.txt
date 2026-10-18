@@ -68,8 +68,8 @@ session+orchestrator seats = 79.9% of raw tokens, 71.1% of $ burn
 == data quality ==
 files scanned: 10 (+0 *.pre-* backups skipped), unreadable: 0, unparseable lines: 0
 entry types seen in the scanned corpus: compaction=1, message=23, model_change=12, session=10, thinking_level_change=7
-duplicate entry ids dropped (replay/branching): 3
-assistant messages without usage: 2; without totalTokens: 1; totalTokens ≠ Σclasses: 0; bad timestamps: 0
+duplicate entry ids dropped (replay/branching, in window): 3
+assistant messages without usage (in window): 2; without totalTokens: 1; totalTokens ≠ Σclasses: 0; bad timestamps: 0
 spawn records joined: 1; without agentName: 0; unreadable: 0
 attribution: ambiguous:review-code|review-plan|review-tests=1, filename=12, meta=1, signature=2
 unattributed: 6,100 raw tokens (7.1%), $0.000200 burn (5.2%) — includes ambiguous groups
@@ -80,7 +80,7 @@ unpriced token classes (excluded from $ burn):
   glm-5.3-flash cache_read: 7,000 tokens — price unknown
 pi-recorded cost (all providers, as charged): $0.000862 vs list-price burn $0.0038
 
-== model-id spellings (whole corpus; canonical ← recorded) ==
+== model-id spellings (whole scanned corpus; canonical ← recorded) ==
   deepseek-v4-pro ← deepseek-v4-pro  [opencode-go]
   deepseek-v4.1-flash ← deepseek-v4.1-flash, deepseek/deepseek-v4.1-flash  [opencode-go, openrouter]
   deepseek-v4.1-flash-1017 ← deepseek/deepseek-v4.1-flash-1017  [openrouter]

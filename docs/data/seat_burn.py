@@ -406,6 +406,8 @@ def scan_sessions(sessions_dir, since, until, q):
     `*.pre-*` backups, and unknown/unparseable lines (counted, never fatal).
     """
     recs = []
+    spellings = defaultdict(set)   # canonical -> recorded spellings (whole scan)
+    routes = defaultdict(set)      # canonical -> providers (whole scan)
     for dirpath, dirnames, filenames in os.walk(sessions_dir):
         dirnames.sort()
         for name in sorted(filenames):
@@ -470,6 +472,13 @@ def scan_sessions(sessions_dir, since, until, q):
                     if total is None:
                         q["no_total_tokens"] += 1
                         continue
+                    raw_model = msg.get("model") or cur_model
+                    canon = canonical_model(raw_model)
+                    provider = msg.get("provider") or "unknown"
+                    # The spelling inventory describes the whole corpus, so it is
+                    # recorded before the window filter drops the record.
+                    spellings[canon].add(raw_model or canon)
+                    routes[canon].add(provider)
                     ts = entry.get("timestamp") or ""
                     day = ts[:10]
                     if len(day) != 10:
@@ -483,15 +492,13 @@ def scan_sessions(sessions_dir, since, until, q):
                     cw = usage.get("cacheWrite") or 0
                     if total != inp + out + cr + cw:
                         q["total_mismatch"] += 1
-                    raw_model = msg.get("model") or cur_model
                     cost = usage.get("cost")
                     recorded = None
                     if isinstance(cost, dict) and isinstance(cost.get("total"), (int, float)):
                         recorded = float(cost["total"])
-                    recs.append(Rec(sid, is_sub, day, ts, canonical_model(raw_model),
-                                    raw_model, msg.get("provider") or "unknown",
+                    recs.append(Rec(sid, is_sub, day, ts, canon, raw_model, provider,
                                     inp, out, cr, cw, int(total), recorded, level))
-    return recs
+    return recs, spellings, routes
 
 
 def peak_multiplier(model, ts):
@@ -550,7 +557,7 @@ def build_report(opts):
 
     table, table_notes = load_signature_table()
     meta = load_meta(opts.meta_dir, q)
-    recs = scan_sessions(opts.sessions_dir, since, until, q)
+    recs, spellings, routes = scan_sessions(opts.sessions_dir, since, until, q)
     if not recs:
         raise DataError(f"no assistant messages with token usage between {since} "
                         f"and {until} under {opts.sessions_dir}")
@@ -561,8 +568,6 @@ def build_report(opts):
     day_seat = {}            # (day, label) -> row
     day_model = {}           # (day, model, route) -> row
     unpriced = Counter()     # (model, class) -> tokens
-    spellings = defaultdict(set)   # canonical -> raw spellings (whole corpus)
-    routes = defaultdict(set)      # canonical -> providers (whole corpus)
     ambiguous = Counter()    # group label -> messages
     ambiguous_sig = {}       # group label -> signature text
     attribution_count = Counter()
@@ -574,9 +579,6 @@ def build_report(opts):
     unmapped = set()
 
     for rec in recs:
-        spellings[rec.model].add(rec.raw_model or rec.model)
-        routes[rec.model].add(rec.provider)
-
         if not rec.is_sub:
             seat, conf = MAIN_SEAT, "filename"
         else:
@@ -979,8 +981,10 @@ def render_text(rep):
         f"unparseable lines: {_num(dq['bad_lines'])}")
     add("entry types seen in the scanned corpus: "
         + ", ".join(f"{k}={_num(v)}" for k, v in dq["entries_by_type"].items()))
-    add(f"duplicate entry ids dropped (replay/branching): {_num(dq['duplicate_ids_dropped'])}")
-    add(f"assistant messages without usage: {_num(dq['messages_without_usage'])}; "
+    add(f"duplicate entry ids dropped (replay/branching, in window): "
+        f"{_num(dq['duplicate_ids_dropped'])}")
+    add(f"assistant messages without usage (in window): "
+        f"{_num(dq['messages_without_usage'])}; "
         f"without totalTokens: {_num(dq['messages_without_total_tokens'])}; "
         f"totalTokens ≠ Σclasses: {_num(dq['total_tokens_mismatch'])}; "
         f"bad timestamps: {_num(dq['bad_timestamps'])}")
@@ -1003,7 +1007,7 @@ def render_text(rep):
         f"list-price burn ${_usd(dq['list_price_burn_usd'])}")
 
     add("")
-    add("== model-id spellings (whole corpus; canonical ← recorded) ==")
+    add("== model-id spellings (whole scanned corpus; canonical ← recorded) ==")
     for row in rep["spelling_inventory"]:
         add(f"  {row['model']} ← {', '.join(row['spellings'])}  [{', '.join(row['routes'])}]")
 
