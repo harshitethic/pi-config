@@ -5,11 +5,17 @@ frontier OpenRouter models, plus a cost score. Reads docs/data/benchlm_snapshot.
 which BenchLM does not track for DeepSeek.
 
 Model rows include thinking-level variants where BenchLM publishes them
-(DeepSeek V4 Pro/Flash: High/Max). The fleet runs DeepSeek at `high`
-(defaultThinkingLevel), so the operative row is the (High) variant; Max is the
-ceiling. `DeepSeek V4 Flash 0731` is the 2026-07-31 checkpoint — BenchLM has not
-ingested it, so its granular benchmarks (SWE-Pro, TB2, SWE-Ver, AA-LCR, IFBench,
-Codeforces, GPQA, Omniscience, LCB, IMO/HMMT) are null pending manual fill.
+(DeepSeek rows: High/Max).
+
+Benchmark weights follow the 2026-10-18 integrity review (decision
+model-tiers/002): SWE-bench Verified dropped (OpenAI abandoned it — ~59% flawed
+tests, contaminated); SWE-bench Pro kept at reduced weight (verifier
+false-negatives ~24-32%, git-history gold-commit exploit inflates some rows);
+Terminal-Bench scored at 4.0 (2.x is stale and cross-version incomparable);
+DeepSWE added at full weight (verifier-hardened, 1.1% false-negatives);
+AIME (saturated), Codeforces (Elo not cross-vendor comparable, arXiv 2602.05891)
+and GPQA (AA retired it in v4.2) are informational columns only, no composite
+weight. AA indices are used within one index version (v4.3.2), never across.
 
 Normalization: well-covered benchmarks -> min-max WITHIN the scored set (mode 'mm');
 sparsely-reported benchmarks (IFBench, LiveCodeBench) -> raw %/100 ('raw') to avoid
@@ -70,6 +76,20 @@ REG = [
     ("GPT-5.4 nano", "OpenAI", "GPT-5.4 nano", "openai/gpt-5.4-nano", 400, True),
     ("MiMo-V2.5", "Xiaomi", "MiMo-V2.5", "xiaomi/mimo-v2.5", 1048, True),
     ("Kimi K3", "Moonshot", "Kimi K3", "moonshotai/kimi-k3", 1048, True),
+    # 2026-10-18 integrity review: OpenCode Go menu SKUs added (decision model-tiers/002).
+    ("GLM-5.3", "Zhipu", "GLM-5.3", "z-ai/glm-5.3", 1048, False),
+    ("GLM-5.3-Flash", "Zhipu", "GLM-5.3-Flash", "z-ai/glm-5.3-flash", 1048, False),
+    ("MiMo-V2.6-Flash", "Xiaomi", "MiMo-V2.6-Flash", "xiaomi/mimo-v2.6-flash", 1048, False),
+    ("MiMo-V2.6-Pro", "Xiaomi", "MiMo-V2.6-Pro", "xiaomi/mimo-v2.6-pro", 1048, False),
+    ("DeepSeek V4.1 Flash 1017", "DeepSeek", "DeepSeek V4.1 Flash 1017", "deepseek/deepseek-v4.1-flash-1017", 1048, False),
+    ("GPT-6 Luna", "OpenAI", "GPT-6 Luna", "openai/gpt-6-luna", 1050, True),
+    ("Gemini 4 Argon", "Google", "Gemini 4 Argon", "google/gemini-4-argon", 1048, True),
+    ("Grok 4.7", "xAI", "Grok 4.7", "x-ai/grok-4.7", 1048, True),
+    ("Qwen3.8 Max", "Alibaba", "Qwen3.8 Max Preview", "qwen/qwen3.8-max-0902", 1000, False),
+    ("Qwen3.8 Flash", "Alibaba", "Qwen3.8-Flash-Next", "qwen/qwen3.8-flash", 1048, True),
+    ("Step 5 Preview", "StepFun", "Step 5 Preview", "stepfun/step-5-preview", 1048, True),
+    ("Muse Spark 1.3", "Meta", "Muse Spark 1.3", "meta/muse-spark-1.3-contributor", 1048, True),
+    ("Claude Haiku 5.5", "Anthropic", "Claude Haiku 5.5", "anthropic/claude-haiku-5.5", 1000, True),
     # 2026-07-31 checkpoint — BenchLM not yet ingested; granular benchmarks pending.
     ("DeepSeek V4 Flash 0731", "DeepSeek", None, "deepseek/deepseek-v4-flash-0731", 1048, False),
 ]
@@ -117,8 +137,8 @@ def row_data(row):
     d = {
         "aa_int": aa_int, "aa_cod": aa_cod, "aa_agt": aa_agt,
         "swe_pro": bench_val("swe_pro", bl_name),
-        "swe_ver": bench_val("swe_ver", bl_name),
-        "tb2": bench_val("tb2", bl_name),
+        "deepswe": bench_val("deepswe", bl_name),
+        "tb4": bench_val("tb4", bl_name),
         "lcr": bench_val("aa_lcr", bl_name),
         "ifbench": bench_val("aa_ifbench", bl_name),
         "aime": bench_val("aime26", bl_name),
@@ -146,7 +166,7 @@ def cost_per_M(rk):
     or_id = next(r[3] for r in ROWS if r[0] == rk)
     m = OR_MODELS.get(or_id)
     if not m or not m.get("prompt"):
-        return None
+        return None  # not on OpenRouter (Go-exclusive SKU) or no published price
     pr, cr, co = (float(m["prompt"]), float(m["cache_read"] or 0), float(m["completion"]))
     eff = (0.02 * pr + CACHE_HIT * cr) if cr > 0 else pr
     return (eff * IN_RATIO + co * OUT_RATIO) * 1e6
@@ -155,25 +175,35 @@ COST = {rk: cost_per_M(rk) for rk in DATA}
 
 # Value-tier membership FIXED (cost-conscious set, flagships excluded).
 EXCLUDE = {"Claude Fable 5", "GPT-5.6 Sol", "Claude Opus 4.8", "GPT-5.6 Terra", "GPT-5.5",
- "Claude Opus 4.7", "Claude Sonnet 5", "GPT-5.4", "Gemini 3.1 Pro", "Claude Sonnet 4.6", "Kimi K3"}
+ "Claude Opus 4.7", "Claude Sonnet 5", "GPT-5.4", "Gemini 3.1 Pro", "Claude Sonnet 4.6", "Kimi K3",
+ "Gemini 4 Argon", "GPT-6 Luna", "Muse Spark 1.3"}
 VALUE = [rk for rk in DATA if rk.split(" (")[0] not in EXCLUDE]
 
-# ---- Role weights (unchanged from prior snapshots) ----
+# OpenCode Go menu: SKUs purchasable on the Go plan (2026-10-18 table).
+GO_MENU = ["GLM-5.3-Flash", "GLM-5.3", "GLM-5.2", "Kimi K3", "Kimi K2.7 Code",
+ "Step 5 Preview", "MiMo-V2.6-Flash", "MiMo-V2.6-Pro", "MiMo-V2.5-Pro",
+ "Muse Spark 1.3", "Qwen3.8 Max", "Qwen3.8 Flash", "Qwen3.7 Plus", "DeepSeek V4.1 Flash 1017",
+ "DeepSeek V4 Pro (High)", "Hy3", "Grok 4.7", "GPT-6 Luna", "GPT-5.6 Luna", "Claude Haiku 5.5",
+ "Gemini 4 Argon", "MiniMax-M3"]
+
+# ---- Role weights (2026-10-18 integrity review; supersede the pre-review weights) ----
+# SWE-bench Pro discounted (verifier FN ~24-32%, git-history exploit); swe_ver dropped;
+# tb2 -> tb4; DeepSWE added; AIME/Codeforces/GPQA informational only.
 MINMAX_ROLES = {
- "Orchestrator": [("lcr", 5, "mm"), ("aa_int", 5, "mm"), ("ifbench", 4, "raw"), ("tb2", 4, "mm"),
-                  ("swe_pro", 3, "mm"), ("aa_agt", 3, "mm")],
- "Implementer": [("swe_pro", 5, "mm"), ("lcb", 5, "raw"), ("aa_cod", 4, "mm"), ("swe_ver", 3, "mm"),
-                 ("tb2", 3, "mm"), ("ifbench", 2, "raw")],
+ "Orchestrator": [("lcr", 5, "mm"), ("aa_int", 5, "mm"), ("ifbench", 4, "raw"), ("tb4", 4, "mm"),
+                  ("swe_pro", 2, "mm"), ("aa_agt", 3, "mm")],
+ "Implementer": [("deepswe", 5, "mm"), ("swe_pro", 3, "mm"), ("lcb", 5, "raw"), ("aa_cod", 4, "mm"),
+                 ("tb4", 3, "mm"), ("ifbench", 2, "raw")],
  "Review-Code": [("aa_cod", 5, "mm"), ("aa_int", 4, "mm"), ("ifbench", 4, "raw"), ("lcr", 3, "mm"),
-                 ("swe_pro", 3, "mm")],
+                 ("swe_pro", 2, "mm")],
  "Review-Tests": [("aa_int", 5, "mm"), ("ifbench", 4, "raw"), ("lcr", 4, "mm"), ("aa_cod", 3, "mm"),
                   ("swe_pro", 2, "mm")],
 }
-GRANULAR = {"Orchestrator": ["lcr", "tb2", "swe_pro", "ifbench"],
-            "Implementer": ["swe_pro", "swe_ver", "tb2", "lcb"],
+GRANULAR = {"Orchestrator": ["lcr", "tb4", "swe_pro", "ifbench"],
+            "Implementer": ["swe_pro", "deepswe", "tb4", "lcb"],
             "Review-Code": ["lcr", "swe_pro", "ifbench"],
             "Review-Tests": ["lcr", "swe_pro", "ifbench"]}
-ORACLE_W = [("lcb", 5), ("hardmath", 4), ("aime", 3)]
+ORACLE_W = [("lcb", 5), ("hardmath", 4)]  # aime/codeforces/gpqa: informational only (2026-10-18)
 LAB_SRC = {rk: LAB[rk] for rk in DATA}
 IMPL_LAB = "DeepSeek"
 
@@ -245,8 +275,10 @@ def table(res, subset, title):
     print(f"\n=== {title} ===")
     print(f"{'MODEL':<26}{'ORCH':>7}{'IMPL':>7}{'ORAC':>7}{'$/M':>7}  {'ctx':>5}  conf(orch/impl/oracle)")
     for rk in sorted(subset, key=lambda r: -(res['Orchestrator'][r] or -1)):
+        cost = COST[rk]
+        cs = f"{cost:>7.3f}" if cost is not None else "    -- "
         print(f"{rk:<26}{f(res['Orchestrator'][rk]):>7}{f(res['Implementer'][rk]):>7}"
-              f"{f(res['Oracle'][rk]):>7}{COST[rk]:>7.3f}  {CTX[rk]:>4}K  "
+              f"{f(res['Oracle'][rk]):>7}{cs}  {CTX[rk]:>4}K  "
               f"{conf_oi(rk,'Orchestrator')} | {conf_oi(rk,'Implementer')} | {conf_oracle(rk)}")
 
 def oracle_detail(subset):
@@ -259,19 +291,24 @@ def oracle_detail(subset):
               f"{sc[rk]:>7.1f}  {conf_oracle(rk)}")
     print(f"  unknown (no math/algo eval): {', '.join(r for r in subset if sc[r] is None)}")
 
-def reviewer_view(subset):
-    print(f"\n=== ADVERSARIAL REVIEW (review-code / review-tests) — value tier ===")
+def reviewer_view(subset, res=None):
+    print(f"\n=== ADVERSARIAL REVIEW (review-code / review-tests) ===")
     print(f"{'MODEL':<26}{'R-CODE':>7}{'R-TEST':>7}{'$/M':>7}  {'ctx':>5}  {'lab':<9} decorr")
-    res = VRES if subset is VALUE else FRES
+    res = res if res is not None else (VRES if subset is VALUE else FRES)
     key = lambda r: -((res['Review-Code'][r] or -1) + (res['Review-Tests'][r] or -1))
     for rk in sorted(subset, key=key):
         decorr = 'same-lab ✗' if LAB[rk] == IMPL_LAB else 'ok ✓'
-        print(f"{rk:<26}{f(res['Review-Code'][rk]):>7}{f(res['Review-Tests'][rk]):>7}{COST[rk]:>7.3f}  "
+        cost = COST[rk]
+        cs = f"{cost:>7.3f}" if cost is not None else "    -- "
+        print(f"{rk:<26}{f(res['Review-Code'][rk]):>7}{f(res['Review-Tests'][rk]):>7}{cs}  "
               f"{CTX[rk]:>4}K  {LAB[rk]:<9} {decorr}")
 
 table(VRES, VALUE, f"PRIMARY: value tier, {len(VALUE)} rows (flagships excluded) @ {int(IN_RATIO*100)}/{int(OUT_RATIO*100)} I/O")
 reviewer_view(VALUE)
 oracle_detail(VALUE)
+GRES = compute(GO_MENU)
+table(GRES, GO_MENU, "OPENCODE GO MENU (decision model-tiers/002, 2026-10-18)")
+reviewer_view(GO_MENU, GRES)
 table(FRES, list(DATA), f"APPENDIX: full frontier, all {len(DATA)} rows")
 
 def pack(res, subset):
@@ -282,7 +319,7 @@ def pack(res, subset):
         "multimodal": MM[rk], "lab": LAB[rk], "decorrelated_from_impl": LAB[rk] != IMPL_LAB,
         "variant": next((r[1] for r in ROWS if r[0] == rk), "base"),
         "aa_int": DATA[rk]["aa_int"], "aa_cod": DATA[rk]["aa_cod"], "aa_agt": DATA[rk]["aa_agt"],
-        "swe_pro": DATA[rk]["swe_pro"], "swe_ver": DATA[rk]["swe_ver"], "tb2": DATA[rk]["tb2"],
+        "swe_pro": DATA[rk]["swe_pro"], "deepswe": DATA[rk]["deepswe"], "tb4": DATA[rk]["tb4"],
         "lcr": DATA[rk]["lcr"], "ifbench": DATA[rk]["ifbench"], "aime": DATA[rk]["aime"],
         "codeforces": DATA[rk]["codeforces"], "gpqa": DATA[rk]["gpqa"],
         "omni_acc": DATA[rk]["omni_acc"], "omni_halluc": DATA[rk]["omni_halluc"],
@@ -293,5 +330,6 @@ def pack(res, subset):
 
 _out = os.path.join(HERE, "role_scores.json")
 json.dump({"fetchedAt": S.get("fetchedAt"), "value_tier": pack(VRES, VALUE),
+           "go_menu": pack(GRES, GO_MENU),
            "full": pack(FRES, list(DATA))}, open(_out, "w"), indent=2)
 print(f"\nwrote {_out}")

@@ -94,6 +94,49 @@ per-benchmark pages + OpenRouter `/models` + `/benchmarks`, all fetched 2026-07-
 
 ---
 
+## 2026-10-18 scorechart — OpenCode Go menu (decision model-tiers/002)
+
+Fresh composites after the benchmark-set integrity review: SWE-bench Verified
+dropped, SWE-bench Pro discounted, Terminal-Bench 4.0 (2.0 was two majors stale),
+DeepSWE added, AIME/Codeforces/GPQA informational-only, AA indices used within one
+index version (v4.3.2, sources 2026-10-17). Min-max within the Go subset (22
+SKUs with data; LongCat-2.0, Space Bunny, Hy4 preview, MiMo-V2.5, LongCat/Beam
+free previews have no BenchLM rows). Halluc% = AA-Omniscience hallucination rate
+(informational — closed-book calibration, not an agentic-hallucination proxy).
+
+| SKU | Orch | Impl | R-Code | R-Test | Halluc% | Go bucket | req/5h | Notes |
+|---|--:|--:|--:|--:|--:|--:|--:|---|
+| Kimi K3 | 84.2 | 99.3 | 89.1 | 86.4 | 53.2 | **$15** | **110** | ⚠ documented eval cheat (answer-key retrieval via sandbox egress, Frontier Security 2026-08); tiny 5h cap |
+| MiMo-V2.6-Pro | 83.1 | -- | 82.2 | 82.4 | 40.6 | **$15** | 3,250 | Impl granular unpublished |
+| Step 5 Preview | 83.0 | -- | 80.8 | 81.3 | 43.0 | $60 (4×, limited time) | 1,720 | Preview SKU — 4× bucket may expire |
+| Gemini 4 Argon | 79.3 | -- | 82.2 | 81.6 | **15.1** | $60 | 440 | Best factuality row; Google self-report caveat; low 5h cap |
+| GLM-5.3 | 78.3 | 97.6 | 73.0 | 68.2 | 29.6 | **$15** | **220** | Impl solid; tiny bucket + 5h cap |
+| Qwen3.8 Max | 71.2 | 78.3 | 69.4 | 66.9 | 28.8 | **$15** | 160 | |
+| Claude Haiku 5.5 | 69.5 | -- | 65.0 | 65.2 | 40.4 | **$15** | 3,850 | |
+| GLM-5.3-Flash | 69.1 | 80.6 | 65.4 | 62.2 | -- | $60 | 6,320 | Main-session default; halluc unmeasured |
+| GPT-5.6 Luna | 68.0 | 74.2 | 85.3 | 86.7 | **92.6** ⚠ | **$15** | 2,050 | Top reviewer scores, worst-in-class hallucination — 016/017 objection stands |
+| Grok 4.7 | 67.8 | 84.5 | 57.7 | 57.3 | 29.3 | **$15** | 169 | $0.80/M tokens |
+| Qwen3.8 Flash | 67.5 | **88.1** | 66.8 | 63.6 | 45.3 | $30 | 5,400 | Strong implementer value |
+| DeepSeek V4.1 Flash 1017 | 65.3 | **-- unmeasured** | 61.6 | 62.1 | **96.5** ⚠ | $80 | 34,670 | Fleet seat; granular rows unpublished — vendor card only (DeepSWE 77.0, TB4.0 42.3) |
+| Muse Spark 1.3 | 63.9 | 55.9 | **87.1** | **83.9** | 32.9 | $60 | **45,300** | ⚠ Contributor SKU — trains on prompts/completions (Not ZDR); AA independently benchmarked |
+| GLM-5.2 | 51.1 | 58.7 | 50.5 | 47.2 | 26.3 | $60 | 880 | |
+| GPT-6 Luna | 45.6 | 6.6 | 58.2 | 58.7 | 76.7 | **$15** | 4,230 | |
+| MiniMax-M3 | 43.1 | 31.4 | 36.0 | 39.1 | 18.4 | $60 | 3,200 | |
+| MiMo-V2.6-Flash | 40.0 | -- | **40.1** | **39.9** | 54.4 | $60 | 30,100 | Current reviewer seat — weakest reviewer row on the menu |
+| DeepSeek V4 Pro (High) | 31.3 | 43.6 | 29.1 | 29.6 | 88.7 | **$15** | 1,050 | The $15-bucket trap; oracle-solid but planning-weak (008) |
+| Qwen3.7 Plus | 28.0 | 30.4 | 32.1 | 32.5 | 27.7 | $60 | 4,300 | |
+| MiMo-V2.5-Pro | 26.7 | 26.6 | 31.8 | 32.3 | 24.7 | **$15** | 3,250 | |
+| Hy3 | 25.3 | 14.4 | 29.0 | 30.1 | 74.1 | $60 | 4,300 | |
+| Kimi K2.7 Code | 24.5 | 10.7 | 33.0 | 33.1 | 82.4 | $60 | 1,350 | |
+
+Sub-3-point gaps are noise (harness variance — Anthropic's infrastructure-noise
+study moved TB2.0 scores by 6 points on resource config alone). Seat-repick
+rulings pending (2026-10-18 discussion, owner): reviewer migration off
+MiMo-V2.6-Flash; implementer/orchestrator re-evaluation. Do not treat the
+composite as a decision — the gaps that matter here are >10 points.
+
+---
+
 ## TL;DR — value-tier picks (cost-conscious set, flagships excluded)
 
 | Role | Top pick | Best value | Notes |
