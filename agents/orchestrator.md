@@ -1,7 +1,7 @@
 ---
 name: orchestrator
 description: "Orchestrator scoped to one workstream or large chunk. Designs, dispatches implement subagents — and, when top-level, orchestrator children for large sub-chunks (sequential or parallel) — gates reviews, merges, and reports. Nesting is capped at one level."
-model: deepseek/deepseek-v4.1-flash-1017:max
+model: opencode-go/deepseek-v4.1-flash:max
 allowedSubagents: orchestrator, implement, scout-code, scout-web, review-plan, math-algo-oracle
 excludeTools: checkpoint_fork, checkpoint_search
 ---

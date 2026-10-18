@@ -12,7 +12,7 @@ discrepancy is explicit, so this is outcome-measured, not benchmark-trusted. See
 `decisions/subagents/023-mimo-decorrelated-reviewer-experiment.md`.
 ---
 
-# OpenRouter-only fleet — deepseek/deepseek-v4.1-flash-1017 (decisions 022 + 035)
+# OpenCode Go plan-quota fleet — opencode-go/deepseek-v4.1-flash (decisions 022, 035, 036)
 
 **Status**: done 2026-10-01 (in-session, no WO; decision `decisions/subagents/022-openrouter-fleet-v41-flash.md`).
 z.ai subscription ended → all seats (orchestrator/implement/reviewers/scouts/oracle/compaction)

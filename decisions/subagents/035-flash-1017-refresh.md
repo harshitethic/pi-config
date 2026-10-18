@@ -28,7 +28,10 @@ date: 2026-10-18
 > scout-sweep to the `-1017` slug; re-probe `deepseek-v4.1-flash` instead. The catalog hand-merge
 > stays in place but is dormant for this seat. **Update same day: `scout-sweep` deleted by owner** — it was an uncommitted
 > cost-tier twin of scout-code (identical body, OpenCode Go frontmatter); with it gone, the
-> OpenCode Go ruling above is dormant until a cost-tier seat exists again.
+> OpenCode Go ruling above is dormant until a cost-tier seat exists again. **Superseded same day by [decision 036](036-fleet-opencode-go.md):**
+> the DeepSeek fleet itself moved to OpenCode Go (`opencode-go/deepseek-v4.1-flash`), so the
+> OpenCode Go routing is no longer a dormant cost-tier escape but the fleet's live route; the
+> `-1017` checkpoint stays reachable via OpenRouter for manual main-session use (pin kept).
 
 **Tradeoff:** one more hand-maintained pin plus one hand-merged catalog entry. When the upstream catalog catches up, `pi update --models` rewrites the merged entry from OpenRouter's live data (the merge is a stopgap against the store's own `lastModified` freshness signal, not a fork of it) — a later re-merge should only be needed if prices change upstream.
 

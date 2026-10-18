@@ -67,7 +67,7 @@ per-benchmark pages + OpenRouter `/models` + `/benchmarks`, all fetched 2026-07-
 > snapshot data (out of fleet; the next data refresh drops them).
 >
 > **2026-10-01 fleet move (decision [022](../decisions/subagents/022-openrouter-fleet-v41-flash.md)):**
-> z.ai is gone — every seat runs `deepseek/deepseek-v4.1-flash-1017` (orchestrator/oracle
+> z.ai is gone — every seat runs the fleet flash model (orchestrator/oracle
 > `:max`, implement/reviewers `:high`, scouts/compaction `:low` after the effort audit), the
 > `/fleet-model` toggle +
 > `~/.pi/fleet-model.json` override are deleted, and the oracle moved off
@@ -87,6 +87,10 @@ per-benchmark pages + OpenRouter `/models` + `/benchmarks`, all fetched 2026-07-
 > **2026-10-18 checkpoint refresh (decision 035):** the fleet model id moves to
 > `deepseek/deepseek-v4.1-flash-1017` (Oct 17 checkpoint; same seat split and effort
 > levels). Vendor card: TB4.0 31.2→42.3, DeepSWE 74.2→77.0, Apex 64.6→72.1, shorter outputs.
+>
+> **2026-10-18 routing move (decision 036):** the DeepSeek fleet seats (implement/oracle/scouts/
+> compaction) ride the OpenCode Go plan quota (`opencode-go/deepseek-v4.1-flash`, same levels);
+> reviewers stay OpenRouter Xiaomi (023); `-1017` remains manually reachable via OpenRouter.
 
 ---
 
@@ -113,13 +117,13 @@ per-benchmark pages + OpenRouter `/models` + `/benchmarks`, all fetched 2026-07-
 
 | Slot | Agent file | Model | Effort | Verdict |
 |---|---|---|---|---|
-| Main session | `settings.json` | deepseek/deepseek-v4.1-flash-1017 | `defaultThinkingLevel` — `max` | ✓ moved 2026-10-01 (decision 022; user's settings flip to openrouter default) |
-| Orchestrator-subagent | `agents/orchestrator.md` | deepseek/deepseek-v4.1-flash-1017 | max | ✓ moved 2026-10-01 (decision 022) |
-| Implementer | `agents/implement.md` | deepseek/deepseek-v4.1-flash-1017 | high | ✓ moved 2026-10-01 (decision 022) |
-| Oracle | `agents/math-algo-oracle.md` | deepseek/deepseek-v4.1-flash-1017 | max | ✓ moved 2026-10-01 (decision 022; beats 0813 on CF/Apex/DeepSWE/TB2.1) |
+| Main session | `settings.json` | opencode-go/glm-5.3-flash | `defaultThinkingLevel` — `high` | ✓ user-flipped 2026-10-18 (OpenCode Go plan; orchestrators inherit per 031) |
+| Orchestrator-subagent | `agents/orchestrator.md` | caller's model + `:max` (031; frontmatter donor `opencode-go/deepseek-v4.1-flash`) | max | ✓ moved 2026-10-01 (decision 022) |
+| Implementer | `agents/implement.md` | opencode-go/deepseek-v4.1-flash | high | ✓ moved 2026-10-01 (decision 022) |
+| Oracle | `agents/math-algo-oracle.md` | opencode-go/deepseek-v4.1-flash | max | ✓ moved 2026-10-01 (decision 022; beats 0813 on CF/Apex/DeepSWE/TB2.1) |
 | Review standard ×3 | `agents/review-{code,plan,tests}.md` | xiaomi/mimo-v2.6-flash (experiment 023) | high | ✓ whole review tier moved 2026-10-01 (023) — decorrelated from the DeepSeek implementer |
-| Scouts ×2 | `agents/scout-{code,web}.md` | deepseek/deepseek-v4.1-flash-1017 | low | ✓ moved 2026-10-01 (decision 022; `:medium` was a silent clamp to high, replaced with the real discount tier for read-only research) |
-| Compaction | `extensions/compaction-model.ts` | deepseek/deepseek-v4.1-flash-1017 | low | ✓ moved 2026-10-01 (decision 022; constant target, explicit `:low` — without a level it rode the provider default `high`) |
+| Scouts ×2 | `agents/scout-{code,web}.md` | opencode-go/deepseek-v4.1-flash | low | ✓ moved 2026-10-01 (decision 022; `:medium` was a silent clamp to high, replaced with the real discount tier for read-only research) |
+| Compaction | `extensions/compaction-model.ts` | opencode-go/deepseek-v4.1-flash | low | ✓ moved 2026-10-01 (decision 022; constant target, explicit `:low` — without a level it rode the provider default `high`) |
 
 > History note: the **review deep ×3** rows (`agents/review-*-deep.md`) were
 > **deleted 2026-08-28** — the tier fired once ever; quality rationale lapsed; see
