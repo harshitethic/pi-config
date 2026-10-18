@@ -15,6 +15,14 @@ date: 2026-10-18
 - **Wait for the pi.dev catalog to publish the row.** The store refresh (`checkedAt` Oct 18 on every provider) reports upstream `lastModified` Oct 15 — the snapshot predates the release, so waiting blocks the directive for a third-party lag. Hand-merge of the official model entry into `~/.pi/agent/models-store.json` lands now; it is superseded wholesale by the next real upstream refresh.
 - **Keep both ids pinned in `models.json`.** The old pin's purpose (022) is a correctness guard for the model the fleet runs; with no seat on the 0910 id it describes nothing. Transferred, not duplicated (022's precedent when moving the pin off 0813).
 
+> **Addendum (2026-10-18):** a live probe of OpenCode Go (`opencode.ai/inference/go/v1`, session
+> header per its docs) shows the gateway recognizes `deepseek-v4.1-flash-1017` but its upstream
+> pool answers "Model is unavailable" — the id is listed, not yet served. `agents/scout-sweep.md`
+> therefore stays on `opencode-go/deepseek-v4.1-flash:low` until a probe succeeds; the catalog
+> hand-merge stays in place so the seat can flip with a one-line edit. (The old id's own probe
+> returned an unrelated upstream "Invalid credential" — OpenCode Go routing quirk, worth a report
+> to them if it persists.)
+
 **Tradeoff:** one more hand-maintained pin plus one hand-merged catalog entry. When the upstream catalog catches up, `pi update --models` rewrites the merged entry from OpenRouter's live data (the merge is a stopgap against the store's own `lastModified` freshness signal, not a fork of it) — a later re-merge should only be needed if prices change upstream.
 
 ## Rollback
