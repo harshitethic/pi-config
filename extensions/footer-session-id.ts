@@ -290,6 +290,18 @@ function formatTokens(count: number): string {
 	return `${Math.round(count / 1000000)}M`;
 }
 
+/**
+ * Prompt-token-weighted cache-hit rate (%): cacheRead ÷ (input + cacheRead + cacheWrite).
+ * Cumulative over the session — unlike the bar's latest-turn CH, this is what the
+ * plan meter actually pays on (the rare fresh-reading turns carry the volume).
+ * Undefined when the provider reports no cache activity (mirrors core's guard).
+ */
+export function cacheHitRate(input: number, cacheRead: number, cacheWrite: number): number | undefined {
+	if (cacheRead + cacheWrite === 0) return undefined;
+	const prompt = input + cacheRead + cacheWrite;
+	return prompt > 0 ? (cacheRead / prompt) * 100 : undefined;
+}
+
 function formatCwdForFooter(cwd: string, home: string | undefined): string {
 	if (!home) return cwd;
 	const resolvedCwd = resolve(cwd);
@@ -1423,6 +1435,10 @@ export default function (pi: ExtensionAPI) {
 						}
 					}
 
+					// Cumulative CH: same totals that drive the ↑/R/W segments, so the
+					// segment is always derivable from the bar itself (R ÷ (↑+R+W)).
+					const cumulativeCacheHitRate = cacheHitRate(totalInput, totalCacheRead, totalCacheWrite);
+
 					// --- Context usage. ---
 					const ctxUsage = fc.getContextUsage?.();
 					const model = fc.model;
@@ -1448,6 +1464,9 @@ export default function (pi: ExtensionAPI) {
 					if (totalCacheWrite) statsParts.push(`W${formatTokens(totalCacheWrite)}`);
 					if ((totalCacheRead > 0 || totalCacheWrite > 0) && latestCacheHitRate !== undefined) {
 						statsParts.push(`CH${latestCacheHitRate.toFixed(1)}%`);
+					}
+					if (cumulativeCacheHitRate !== undefined) {
+						statsParts.push(theme.fg("dim", `∑CH${cumulativeCacheHitRate.toFixed(1)}%`));
 					}
 					const usingSubscription = model && fc.modelRegistry?.isUsingOAuth?.(model);
 					if (totalCost || usingSubscription) {
