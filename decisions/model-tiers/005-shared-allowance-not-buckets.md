@@ -25,10 +25,17 @@ that model."
 capped at 1.0 (the plan-wide constant cancels — Go's is $60 normalized; Go Plus's is
 unpublished and unneeded). `/zen/go/v1/usage`'s monthly % is this meter server-side.
 
-**Enforcement at the limit:** HTTP 429 hard block until the window resets — no grace margin,
-no throttle, no overage billing. Optional console "Use balance" falls back to pay-as-you-go
-credits instead of blocking. The 5h window is an **anchored reset** (cleared only when the
-last update ages out), not a sliding window.
+**Enforcement and bypass** (full support quote, re-verified 2026-10-18): HTTP 429 hard block
+until the window resets — no grace margin, no overage billing. **Free models keep working**
+after exhaustion. Optional console "Use balance" falls back to Zen credits (PAYG) instead of
+blocking. The 5h window is an **anchored reset** (cleared only when the last update ages out),
+not a sliding window. The quote's worked example pins the weighting: "$1 of GLM-5.3-Flash
+usage uses the same share of your allowance as $0.25 of Kimi K3 usage" (= 60/15).
+
+**Provenance gap:** the Go *Plus* per-model figures (160/180/60/60) are console-researched
+(WO-2026-053 scout), not independently re-verifiable; the docs' limit column ($80/60/15/15)
+is the **Go** plan. Seat conclusions only need the GLM/MiMo limit ratio ≥ 1.76 (scout: 3×,
+docs column: 4× — both safe); a true ratio < 1.76 would flip the per-token meter ranking.
 
 **What this corrects:**
 - 036's "three separate buckets" and any additive headroom arithmetic (including
