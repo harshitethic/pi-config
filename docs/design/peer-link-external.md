@@ -15,7 +15,11 @@ Code: `extensions/peer-link/external.ts` (CLI, not a pi extension). Decision: `d
 ## Flow
 
 - **SessionStart** (`hook session-start`): registers `_peers/claude-<session_id>.json` with `external: true`; prints the session's identity and send usage as context.
-- **UserPromptSubmit** (`hook prompt`): refreshes the registration, prints pending envelopes as context on the user's prompt, then deletes them (ack).
+- **UserPromptSubmit** (`hook prompt`): refreshes the registration, prints pending envelopes as context on the user's prompt, records them as inflight (no ack).
+- **Stop** (`hook stop`): acks exactly the envelopes the completed turn carried (inflight set). Bookkeeping only — deletes files, starts no turn.
+- **SessionEnd** (`hook session-end`): removes the registration. Un-acked mail stays in the inbox.
+
+Delivery is at-least-once: an aborted prompt (Escape, crash) acks nothing, so the next prompt re-emits the un-acked envelopes from the inbox (duplicates over loss — the mailbox contract in `extensions/peer-link/mailbox.ts`). Before 2026-10-18 the prompt hook acked at emit and an aborted prompt lost its mail (reported by the external Claude peer after an Escape-re-send dropped five envelopes); the Stop hook is the consumption confirmation Claude Code "gives no later" — it just needed the prompt hook to stop acking early.
 - **SessionEnd** (`hook session-end`): removes the registration.
 - **Send** (Claude's Bash tool): `external.ts send --from claude-<sid> [--reply] [--require-online] <to> <text | ->`. Same delivery gate as pi: unlisted targets fail loud. `external.ts list` lists peers.
 - **pi side:** external peers are listed, never "online", and age out after 24 h without refresh (`EXTERNAL_TTL_MS`) instead of pi's 2 min sweep window. pi's sends and auto-replies to them queue as "queued — external peer, read when its user next prompts"; `requireOnline` fails. pi never reads or injects into an external inbox.
@@ -30,9 +34,12 @@ Merge into the `hooks` block of `~/.claude/settings.json`:
 "hooks": {
   "SessionStart": [{ "hooks": [{ "type": "command", "command": "bun ~/Developer/pi-config/extensions/peer-link/external.ts hook session-start" }] }],
   "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "bun ~/Developer/pi-config/extensions/peer-link/external.ts hook prompt" }] }],
+  "Stop": [{ "hooks": [{ "type": "command", "command": "bun ~/Developer/pi-config/extensions/peer-link/external.ts hook stop" }] }],
   "SessionEnd": [{ "hooks": [{ "type": "command", "command": "bun ~/Developer/pi-config/extensions/peer-link/external.ts hook session-end" }] }]
 }
 ```
+
+Without the Stop hook nothing acks: mail is re-emitted on every prompt (duplicates, no loss). Add it.
 
 ## Terms of Service compliance
 
@@ -61,7 +68,7 @@ Rejected designs, and why:
 
 **Invariants for future changes:**
 
-- Never add a path that starts a Claude turn: no watcher, no `claude -p`, no SDK call, no Stop hook that continues the turn.
+- Never add a path that starts a Claude turn: no watcher, no `claude -p`, no SDK call, no Stop hook that continues the turn. (A Stop hook that only acks delivered mail is bookkeeping, not continuation — it is the one Stop hook allowed here.)
 - Never read, copy, or forward Claude Code credentials, OAuth tokens, transcripts, or `~/.claude` state.
 - Keep `external.ts` free of network calls and child processes.
 - Nothing reads an external inbox except the `UserPromptSubmit` hook; pi never reads or injects into it.

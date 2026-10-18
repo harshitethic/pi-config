@@ -200,6 +200,15 @@ describe("owner asks: statusline CLI", () => {
 
 /** session_start fires its refresh without awaiting it; a registry repo's status lands after its git and script calls. */
 const settle = () => new Promise((resolve) => setTimeout(resolve, 200));
+/** Bounded poll — the draw path spawns git/python3, which takes seconds on a
+ * loaded machine; a fixed sleep races it. Still fails when nothing arrives. */
+const waitFor = async (ready: () => boolean, ms = 20_000): Promise<void> => {
+	const deadline = Date.now() + ms;
+	while (!ready()) {
+		if (Date.now() > deadline) return;
+		await new Promise((resolve) => setTimeout(resolve, 50));
+	}
+};
 
 describe("owner asks: pi extension wiring", () => {
 	it("clears the status outside a registry repo, and /asks reports that instead of acking", async () => {
@@ -303,7 +312,7 @@ describe("owner asks: work-order departures", () => {
 		const next = git(root, "rev-parse", "HEAD");
 		expect((await ownerAsks(root, cache))!.unruled).toEqual([]);
 		expect(runs()).toEqual([`unruled ${sha}`, `unruled ${next}`]);
-	});
+	}, 30_000);
 
 	it("reads a cache written before departures existed again", async () => {
 		const { root, cache } = makeRepo(ASKS_AB, { upstream: true, unruled: UNRULED });
@@ -328,7 +337,7 @@ describe("owner asks: work-order departures", () => {
 			encoding: "utf8",
 		});
 		expect(out.stdout).toBe(`${basename(root)} · main · \x1b[33mowner asks: 2 open · 1 unruled departure\x1b[0m\n`);
-	});
+	}, 30_000);
 
 	it("shows in the pi status bar with nothing new, in the warning colour", async () => {
 		const handlers: Record<string, (event: unknown, ctx: unknown) => unknown> = {};
@@ -351,7 +360,7 @@ describe("owner asks: work-order departures", () => {
 		};
 		loadExtension(pi as never);
 		handlers.session_start({}, ctx);
-		await settle();
+		await waitFor(() => statuses.at(-1) !== undefined);
 		expect(statuses.at(-1)).toBe("[warning]owner asks: 0 open · 1 unruled departure");
 		await handlers.session_shutdown({}, ctx);
 	});

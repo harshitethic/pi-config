@@ -5,7 +5,8 @@
  *
  * Driven by Claude Code hooks (stdin = hook input JSON):
  *   external.ts hook session-start   register `claude-<session_id>`; print identity + usage
- *   external.ts hook prompt          refresh registration; print pending mail; ack it
+ *   external.ts hook prompt          refresh registration; print pending mail; record it inflight
+ *   external.ts hook stop            ack what the completed turn carried (bookkeeping only)
  *   external.ts hook session-end     unregister
  * And by the session itself:
  *   external.ts send --from <name> [--reply] [--require-online] <to> <text | ->
@@ -13,9 +14,13 @@
  *
  * Mail is read only inside a hook the user's prompt fired, so nothing here
  * starts a Claude turn. Why that matters: docs/design/peer-link-external.md.
+ * Delivery is at-least-once: envelopes are acked only by the Stop hook, after
+ * a turn that carried them completed; an aborted prompt leaves them in the
+ * inbox and the next prompt re-emits them (duplicates over loss).
  */
 
 import * as fs from "node:fs";
+import * as path from "node:path";
 import {
 	type Envelope,
 	ackEnvelope,
@@ -87,6 +92,40 @@ function sendUsage(self: string, to = "<peer>"): string {
 	return `bun ${SELF} send --from ${self} ${to} '<text>'`;
 }
 
+// ── inflight state ─────────────────────────────────────────────────────────
+//
+// The prompt hook records which envelopes the just-submitted prompt carries;
+// the Stop hook acks exactly that set (the turn completed, so its context —
+// which carried the mail — was consumed). Envelopes are otherwise left in the
+// inbox until acked, so an aborted prompt loses nothing: the next prompt
+// re-emits whatever is un-acked. Crash-safety falls out of the same rule —
+// a lost inflight file means re-emission (duplicate), never loss.
+
+function inflightPath(mailbox: string, name: string): string {
+	return path.join(mailbox, "inflight", `${name}.json`);
+}
+
+function markInflight(mailbox: string, name: string, envelopes: Envelope[]): void {
+	const p = inflightPath(mailbox, name);
+	fs.mkdirSync(path.dirname(p), { recursive: true });
+	fs.writeFileSync(p, JSON.stringify(envelopes));
+}
+
+function ackInflight(mailbox: string, name: string): void {
+	let carried: Envelope[] = [];
+	try {
+		carried = JSON.parse(fs.readFileSync(inflightPath(mailbox, name), "utf8")) as Envelope[];
+	} catch {
+		return; // nothing inflight (or unreadable state) — nothing to ack
+	}
+	try {
+		fs.unlinkSync(inflightPath(mailbox, name));
+	} catch {
+		// already gone; acks below are idempotent
+	}
+	for (const env of carried) ackEnvelope(mailbox, name, env);
+}
+
 function hook(event: string): void {
 	const input = hookInput();
 	const mailbox = mailboxRoot();
@@ -108,11 +147,16 @@ function hook(event: string): void {
 			const envelopes = readIncoming(mailbox, self);
 			if (envelopes.length === 0) return;
 			emitContext("UserPromptSubmit", renderMail(self, envelopes));
-			// Ack after writing: delivery is at-least-once up to the hook boundary;
-			// Claude Code gives no later confirmation to wait for.
-			for (const e of envelopes) ackEnvelope(mailbox, self, e);
+			// At-least-once: no ack here — the prompt can be aborted before the turn
+			// consumes this context (mail loss bug, 2026-10-18). The Stop hook acks
+			// what a completed turn carried; un-acked mail is re-emitted next prompt.
+			markInflight(mailbox, self, envelopes);
 			return;
 		}
+		case "stop":
+			// Bookkeeping only: acks files, starts no turn (ToS invariants hold).
+			ackInflight(mailbox, self);
+			return;
 		case "session-end":
 			removeHeartbeat(mailbox, self);
 			return;

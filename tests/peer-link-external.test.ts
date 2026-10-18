@@ -76,7 +76,7 @@ describe("external peers in the mailbox layer", () => {
 });
 
 describe("external.ts CLI (as Claude Code hooks run it)", () => {
-	it("registers, receives a pi send, delivers it once on prompt, and unregisters", () => {
+	it("registers, receives a pi send, delivers on prompt, acks at Stop, and unregisters", () => {
 		const start = run(["hook", "session-start"], hookJson("SessionStart"));
 		expect(start.code).toBe(0);
 		expect(JSON.parse(start.out).hookSpecificOutput.additionalContext).toContain(SELF);
@@ -93,7 +93,10 @@ describe("external.ts CLI (as Claude Code hooks run it)", () => {
 		const ctx = JSON.parse(prompt.out).hookSpecificOutput;
 		expect(ctx.hookEventName).toBe("UserPromptSubmit");
 		expect(ctx.additionalContext).toContain("[peer:bug-triage] issue #42 filed");
-		expect(readIncoming(dir, SELF)).toEqual([]); // acked
+		expect(readIncoming(dir, SELF)).toHaveLength(1); // inflight, NOT acked yet
+
+		expect(run(["hook", "stop"], hookJson("Stop")).code).toBe(0);
+		expect(readIncoming(dir, SELF)).toEqual([]); // turn completed → acked
 
 		const again = run(["hook", "prompt"], hookJson("UserPromptSubmit"));
 		expect(again.code).toBe(0);
@@ -101,7 +104,48 @@ describe("external.ts CLI (as Claude Code hooks run it)", () => {
 
 		expect(run(["hook", "session-end"], hookJson("SessionEnd")).code).toBe(0);
 		expect(listPeers(dir).some((p) => p.name === SELF)).toBe(false);
-	});
+	}, 20_000);
+
+	it("an aborted prompt loses nothing: un-acked mail is re-emitted on the next prompt", () => {
+		run(["hook", "session-start"], hookJson("SessionStart"));
+		sendEnvelope(dir, newEnvelope("bug-triage", SELF, "mail that must survive Escape"));
+
+		const first = run(["hook", "prompt"], hookJson("UserPromptSubmit"));
+		expect(first.out).toContain("mail that must survive Escape");
+		// Escape: the turn is aborted, no Stop hook fires.
+		const second = run(["hook", "prompt"], hookJson("UserPromptSubmit"));
+		expect(second.out).toContain("mail that must survive Escape"); // re-emitted
+		expect(readIncoming(dir, SELF)).toHaveLength(1); // still exactly one envelope (dedup)
+
+		run(["hook", "stop"], hookJson("Stop"));
+		expect(readIncoming(dir, SELF)).toEqual([]);
+		expect(run(["hook", "prompt"], hookJson("UserPromptSubmit")).out).toBe("");
+	}, 20_000);
+
+	it("Stop acks only what the completed turn carried; mid-turn arrivals wait", () => {
+		run(["hook", "session-start"], hookJson("SessionStart"));
+		sendEnvelope(dir, newEnvelope("bug-triage", SELF, "seen by the turn"));
+		const prompt = run(["hook", "prompt"], hookJson("UserPromptSubmit"));
+		expect(prompt.out).toContain("seen by the turn");
+		sendEnvelope(dir, newEnvelope("bug-triage", SELF, "arrived mid-turn"));
+
+		run(["hook", "stop"], hookJson("Stop"));
+		const left = readIncoming(dir, SELF);
+		expect(left).toHaveLength(1);
+		expect(left[0].text).toBe("arrived mid-turn");
+
+		const next = run(["hook", "prompt"], hookJson("UserPromptSubmit"));
+		expect(next.out).toContain("arrived mid-turn");
+		expect(next.out).not.toContain("seen by the turn");
+	}, 20_000);
+
+	it("Stop with nothing inflight is a clean no-op", () => {
+		run(["hook", "session-start"], hookJson("SessionStart"));
+		const r = run(["hook", "stop"], hookJson("Stop"));
+		expect(r.code).toBe(0);
+		expect(r.out).toBe("");
+		expect(readIncoming(dir, SELF)).toEqual([]);
+	}, 20_000);
 
 	it("sends to a listed pi peer, from stdin, with --reply", () => {
 		run(["hook", "session-start"], hookJson("SessionStart"));
@@ -112,7 +156,7 @@ describe("external.ts CLI (as Claude Code hooks run it)", () => {
 		const [env] = readIncoming(dir, "bug-triage");
 		expect(env).toMatchObject({ from: SELF, to: "bug-triage", text: "repro: x\nwhere: y", expectReply: true });
 		expect(typeof env.sentAt).toBe("number");
-	});
+	}, 20_000);
 
 	it("fails loud: unlisted target, unregistered sender, requireOnline to an offline peer", () => {
 		run(["hook", "session-start"], hookJson("SessionStart"));
@@ -130,5 +174,5 @@ describe("external.ts CLI (as Claude Code hooks run it)", () => {
 		const offline = run(["send", "--from", SELF, "--require-online", "bug-triage", "hi"]);
 		expect(offline.code).toBe(1);
 		expect(readIncoming(dir, "bug-triage")).toEqual([]);
-	});
+	}, 20_000);
 });
