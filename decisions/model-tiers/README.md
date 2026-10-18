@@ -11,3 +11,4 @@ date: 2026-10-07
 | 002 | BenchLM as a second axis source — evaluated and rejected (different scale) | done |
 | 003 | Benchmark-set integrity review — swe_ver dropped, TB4.0, DeepSWE added, AIME/Codeforces/GPQA demoted | done |
 | 004 | Cost evaluation = monthly cap only; request-rate caps carry zero cost weight | done |
+| 005 | Go allowance is shared + weighted — per-model figures are solo capacity, not buckets | done |

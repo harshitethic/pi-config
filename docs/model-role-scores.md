@@ -137,9 +137,12 @@ implementer stays on DeepSeek V4.1 Flash. Do not treat the composite as a
 decision — the gaps that matter here are >10 points.
 
 **Cost evaluation is monthly-cap-only** (owner ruling, [model-tiers/004](../decisions/model-tiers/004-monthly-cap-only-cost-metric.md)):
-compare effective monthly volume (monthly $ bucket ÷ blended $/M burn rate) and
+compare effective monthly volume (monthly listed $ limit ÷ blended $/M burn rate) and
 nothing else. The req/5h column is informational — never a cost input, never
-converted into monthly-equivalents.
+converted into monthly-equivalents. Effective volume = solo capacity, not a private
+bucket: Go enforces one shared weighted allowance ([model-tiers/005](../decisions/model-tiers/005-shared-allowance-not-buckets.md)),
+so fleet sustainability is judged against `Σ real$ ÷ listedLimit ≤ 1`, and the "$ bucket"
+columns below are solo-capacity illustrations.
 
 ---
 
