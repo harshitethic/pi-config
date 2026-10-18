@@ -24,6 +24,12 @@ the measurement. Other watch: OpenRouter credits nearly dry ($511.98 used of $53
 `-1017` fidelity escape hatch is decorative until topped up. Bucket-exhaustion behavior is
 no longer unknown (`model-tiers/005`): 429 hard block until reset, optional "Use balance"
 PAYG fallback — consider enabling that fallback in the console before a heavy month.
+**Update (later 2026-10-18, decision `subagents/038`):** owner flipped the main session to
+`opencode-go/glm-5.3-flash` (037's owner-choice slot discharged; MiMo-Pro stays available
+per-session). Recheck instead ~2026-10-21 with `--since 2026-10-19` (first full days on the
+new seat): compare session meter share vs the pre-flip 76%; the thresholds above are
+discharged by the flip — the open question is whether GLM-Flash holds the planning/orch
+seat (no measured Orch score; promotion path `glm-5.3`, listed limit unrecorded).
 ---
 
 # Experiment — MiMo V2.6 Flash as the decorrelated reviewer tier (decision 023)

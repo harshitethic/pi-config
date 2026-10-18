@@ -44,3 +44,4 @@ date: 2026-07-14
 | 035 | Fleet model id → `deepseek/deepseek-v4.1-flash-1017` (Oct 17 checkpoint; pin + store hand-merge) | done |
 | 036 | DeepSeek fleet rides the OpenCode Go plan quota (`opencode-go/deepseek-v4.1-flash`; V4 Pro-style $15 buckets avoided) | done |
 | 037 | Reviewers → `opencode-go/glm-5.3-flash:high` (023 experiment superseded); oracle → `opencode-go/deepseek-v4-pro:max` | done |
+| 038 | Main session → `opencode-go/glm-5.3-flash` (meter-driven); multi-session orchestrator split | done |
