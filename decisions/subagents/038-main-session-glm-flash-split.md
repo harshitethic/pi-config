@@ -15,7 +15,13 @@ settings WIP). This fills 037's "user session + orchestrators → owner's choice
 weighted allowance, meter = `Σ real$ ÷ listedLimit`) + the first `seat_burn.py` window
 (Oct 17–18, WO-2026-053): session+orchestrator traffic was 31.7% of raw tokens but 50.2% of
 list-$ and **76% of the plan meter**, because MiMo-V2.6-Pro tokens weigh ~18× GLM-5.3-Flash
-per raw token against the meter. The session seat was the dominant meter term, so it moves
+per raw token against the meter (**magnitude superseded 2026-10-18, later:** the published
+Go cache prices collapse this to **1.7×** — GLM-Flash cache-read is $0.03/M, MiMo-Pro's
+$0.003625; see [model-tiers/005](../model-tiers/005-shared-allowance-not-buckets.md). The
+seat moves stand on direction — GLM-Flash is still the lighter meter weight, and keeping
+MiMo concentrated in one seat still right — but they buy 1.7×, not 18×. The session seat
+was still the dominant meter term at the old MiMo mix; post-flip the largest consumer is
+collective GLM-Flash volume, watched at the recheck.). The session seat was the dominant meter term, so it moves
 to the lightest per-token model on the menu. MiMo-V2.6-Pro stays available as a manual
 per-session choice where its capability is worth the weight.
 

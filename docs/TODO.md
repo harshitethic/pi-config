@@ -6,8 +6,13 @@ First data (Oct 17–18, 1.14B raw tokens): **session+orch = 31.7% of tokens, 50
 76% of the plan meter**; meter 0.119 in 2 days → 178% month at that pace — but those two days
 were our heaviest ever and ~half the traffic still routed via OpenRouter (excluded from the
 meter). Server cross-check: tool 5.9%/day vs `/zen/go/v1/usage` ≈5.7%/day — agreement.
-Price caveat: GLM-5.3-Flash cache-read unpriced and MiMo-Pro price is a placeholder; pi's
-catalog disagrees with the table by 2.4–3.3× on both — meter is ±2×.
+Price caveat **resolved 2026-10-18**: the Go docs table (opencode.ai/v2/docs/console/go/)
+publishes cache-read for every model — GLM-Flash $0.03, MiMo-Pro $0.003625 (the 0.036
+placeholder was 10× high), DS-Pro $0.022/0.044 peak; prices now match pi-recorded exactly.
+Corrected meter (same window): 0.124/2d, split GLM-Flash 60% / MiMo 33% / DS 7%. Corrected
+per-token meter weights: DS 5.4e-5, GLM 2.2e-4, MiMo 3.8e-4 — MiMo is 1.7× GLM (not 18×),
+GLM 4.1× DS. Solo monthly throughput: DS-Flash ≈13–18B tokens (king), GLM-Flash ≈4.5B,
+MiMo-Pro ≈2.6B (`model-tiers/005`).
 Go enforces **one shared weighted allowance**, not per-model
 buckets (`model-tiers/005`): plan-wide meter = `Σ real$ ÷ listedLimit ≤ 1`. Fleet at 250M raw
 tokens/day on ~3 heavy days/week (~4–5B/mo) puts ~35%-share session/orch traffic on the

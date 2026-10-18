@@ -48,10 +48,13 @@ Pricing — list price per token class ($/M), never a blended rate
 offers no importable per-class helper — it is a script that rewrites
 `role_scores.json` on import — so the table is embedded here). Each row carries
 its `source`. A class whose price is unpublished is *not* invented: those tokens
-are reported as unpriced and excluded from $ burn. MiMo-V2.6-Pro's Go price is
-unknown, so its row carries the Xiaomi/OpenRouter list price as a flagged
-placeholder. Peak: ×2 for DeepSeek V4.1 Flash on weekdays 01:00–04:00 and
-06:00–10:00 UTC (`decisions/subagents/036`); every other model's peak behaviour
+are reported as unpriced and excluded from $ burn. Prices for the Go SKUs come
+from the published console table (opencode.ai/v2/docs/console/go/, fetched
+2026-10-18 — includes cache-read for every model; cross-checked against
+pi-recorded $ on the 2026-10-17 window). Peak: ×2 for DeepSeek rows on weekdays
+01:00–04:00 and
+06:00–10:00 UTC (`decisions/subagents/036`, confirmed by the docs table); every
+other model's peak behaviour
 is unknown and not modelled.
 
 Run:
@@ -115,13 +118,13 @@ PRICES = {
                   "the 0910 id, weekday peak windows unchanged)",
     },
     "deepseek-v4-pro": {
-        "input": 0.66, "output": 1.98, "cache_read": None, "cache_write": None,
-        "peak": None,
+        "input": 0.66, "output": 1.98, "cache_read": 0.022, "cache_write": None,
+        "peak": True,
         "listed_limit_usd": 60.0,
         "limit_source": "WO-2026-053 amendment 2026-10-18 (Go Plus solo capacity; "
                         "supersedes 037's $15 Go-era figure)",
-        "source": "decisions/subagents/036 + WO-2026-053 price table (in/out only; no "
-                  "cache-read price given — cannot be derived, so unpriced)",
+        "source": "opencode.ai/v2/docs/console/go/ table (fetched 2026-10-18): "
+                  "0.022 off-peak / 0.044 peak (= the ×2 multiplier here)",
     },
     "deepseek-v4-flash": {
         "input": 0.14, "output": 0.28, "cache_read": 0.028, "cache_write": None,
@@ -135,18 +138,19 @@ PRICES = {
                   "cheaper cache read)",
     },
     "glm-5.3-flash": {
-        "input": 0.15, "output": 0.50, "cache_read": None, "cache_write": None,
+        "input": 0.15, "output": 0.50, "cache_read": 0.03, "cache_write": None,
         "peak": None,
         "listed_limit_usd": 180.0,
         "limit_source": "WO-2026-053 amendment 2026-10-18 (Go Plus solo capacity; "
                         "supersedes 037's $60 Go-era figure)",
-        "source": "decisions/subagents/036 + WO-2026-053 price table (in/out only; no "
-                  "cache-read price given — unpriced)",
+        "source": "opencode.ai/v2/docs/console/go/ table (fetched 2026-10-18); "
+                  "in/out per 036 — cache-read $0.03 confirmed by exact match with "
+                  "pi-recorded $ on the 2026-10-17 window",
     },
     "glm-5.3": {
-        "input": 1.40, "output": 4.40, "cache_read": None, "cache_write": None,
+        "input": 1.40, "output": 4.40, "cache_read": 0.26, "cache_write": None,
         "peak": None,
-        "source": "decisions/subagents/036 + WO-2026-053 price table (in/out only)",
+        "source": "opencode.ai/v2/docs/console/go/ table (fetched 2026-10-18); in/out per 036",
     },
     "mimo-v2.6-flash": {
         "input": 0.14, "output": 0.28, "cache_read": 0.0028, "cache_write": None,
@@ -154,19 +158,20 @@ PRICES = {
         "source": "decisions/subagents/023 (Xiaomi first-party pin, in/out/cache-read)",
     },
     "mimo-v2.6-pro": {
-        "input": 0.435, "output": 0.87, "cache_read": 0.036, "cache_write": None,
+        "input": 0.435, "output": 0.87, "cache_read": 0.003625, "cache_write": None,
         "peak": None,
-        "placeholder": True,
         "listed_limit_usd": 60.0,
         "limit_source": "WO-2026-053 amendment 2026-10-18 + decisions/subagents/036 "
                         "(the watched allowance consumer)",
-        "source": "PLACEHOLDER — Xiaomi/OpenRouter list price (WO-2026-053); the "
-                  "OpenCode Go price for this SKU is unknown",
+        "source": "opencode.ai/v2/docs/console/go/ table (fetched 2026-10-18) — "
+                  "first-party Xiaomi prices; supersedes the 0.036 OpenRouter "
+                  "cache placeholder (10x too high); matches pi-recorded $",
     },
     "mimo-v2.5-pro": {
-        "input": 0.435, "output": 0.87, "cache_read": 0.0036, "cache_write": None,
+        "input": 0.435, "output": 0.87, "cache_read": 0.003625, "cache_write": None,
         "peak": None,
-        "source": "decisions/subagents/010 (OpenRouter live /models row)",
+        "source": "opencode.ai/v2/docs/console/go/ table (fetched 2026-10-18); "
+                  "matches the OpenRouter row in 010",
     },
     "minimax-m3": {
         "input": 0.30, "output": 1.20, "cache_read": 0.06, "cache_write": None,

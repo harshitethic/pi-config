@@ -104,30 +104,41 @@ SKUs with data; LongCat-2.0, Space Bunny, Hy4 preview, MiMo-V2.5, LongCat/Beam
 free previews have no BenchLM rows). Halluc% = AA-Omniscience hallucination rate
 (informational — closed-book calibration, not an agentic-hallucination proxy).
 
-| SKU | Orch | Impl | R-Code | R-Test | Halluc% | Go bucket | req/5h | Notes |
+| SKU | Orch | Impl | R-Code | R-Test | Halluc% | chr-blend ¢/M | solo B tok/mo | Notes |
 |---|--:|--:|--:|--:|--:|--:|--:|---|
-| Kimi K3 | 84.2 | 99.3 | 89.1 | 86.4 | 53.2 | **$15** | **110** | ⚠ documented eval cheat (answer-key retrieval via sandbox egress, Frontier Security 2026-08); tiny 5h cap |
-| MiMo-V2.6-Pro | 83.1 | -- | 82.2 | 82.4 | 40.6 | **$15** | 3,250 | Impl granular unpublished |
-| Step 5 Preview | 83.0 | -- | 80.8 | 81.3 | 43.0 | $60 (4×, limited time) | 1,720 | Preview SKU — 4× bucket may expire |
-| Gemini 4 Argon | 79.3 | -- | 82.2 | 81.6 | **15.1** | $60 | 440 | Best factuality row; Google self-report caveat; low 5h cap |
-| GLM-5.3 | 78.3 | 97.6 | 73.0 | 68.2 | 29.6 | **$15** | **220** | Impl solid; tiny bucket + 5h cap |
-| Qwen3.8 Max | 71.2 | 78.3 | 69.4 | 66.9 | 28.8 | **$15** | 160 | |
-| Claude Haiku 5.5 | 69.5 | -- | 65.0 | 65.2 | 40.4 | **$15** | 3,850 | |
-| GLM-5.3-Flash | 69.1 | 80.6 | 65.4 | 62.2 | -- | $60 | 6,320 | Main-session default; halluc unmeasured |
-| GPT-5.6 Luna | 68.0 | 74.2 | 85.3 | 86.7 | **92.6** ⚠ | **$15** | 2,050 | Top reviewer scores, worst-in-class hallucination — 016/017 objection stands |
-| Grok 4.7 | 67.8 | 84.5 | 57.7 | 57.3 | 29.3 | **$15** | 169 | $0.80/M tokens |
-| Qwen3.8 Flash | 67.5 | **88.1** | 66.8 | 63.6 | 45.3 | $30 | 5,400 | Strong implementer value |
-| DeepSeek V4.1 Flash 1017 | 65.3 | **-- unmeasured** | 61.6 | 62.1 | **96.5** ⚠ | $80 | 34,670 | Fleet seat; granular rows unpublished — vendor card only (DeepSWE 77.0, TB4.0 42.3) |
-| Muse Spark 1.3 | 63.9 | 55.9 | **87.1** | **83.9** | 32.9 | $60 | **45,300** | ⚠ Contributor SKU — trains on prompts/completions (Not ZDR); AA independently benchmarked |
-| GLM-5.2 | 51.1 | 58.7 | 50.5 | 47.2 | 26.3 | $60 | 880 | |
-| GPT-6 Luna | 45.6 | 6.6 | 58.2 | 58.7 | 76.7 | **$15** | 4,230 | |
-| MiniMax-M3 | 43.1 | 31.4 | 36.0 | 39.1 | 18.4 | $60 | 3,200 | |
-| MiMo-V2.6-Flash | 40.0 | -- | **40.1** | **39.9** | 54.4 | $60 | 30,100 | Current reviewer seat — weakest reviewer row on the menu |
-| DeepSeek V4 Pro (High) | 31.3 | 43.6 | 29.1 | 29.6 | 88.7 | **$15** | 1,050 | The $15-bucket trap; oracle-solid but planning-weak (008) |
-| Qwen3.7 Plus | 28.0 | 30.4 | 32.1 | 32.5 | 27.7 | $60 | 4,300 | |
-| MiMo-V2.5-Pro | 26.7 | 26.6 | 31.8 | 32.3 | 24.7 | **$15** | 3,250 | |
-| Hy3 | 25.3 | 14.4 | 29.0 | 30.1 | 74.1 | $60 | 4,300 | |
-| Kimi K2.7 Code | 24.5 | 10.7 | 33.0 | 33.1 | 82.4 | $60 | 1,350 | |
+| Kimi K3 | 84.2 | 99.3 | 89.1 | 86.4 | 53.2 | 35.1 | 0.04 (Go) | ⚠ documented eval cheat (answer-key retrieval via sandbox egress, Frontier Security 2026-08); tiny 5h cap |
+| MiMo-V2.6-Pro | 83.1 | -- | 82.2 | 82.4 | 40.6 | 0.88 | 6.8 | Impl granular unpublished; cheapest capable cache ($0.003625) |
+| Step 5 Preview | 83.0 | -- | 80.8 | 81.3 | 43.0 | 11.2 | 0.53 | Preview SKU — 4× bucket may expire |
+| Gemini 4 Argon | 79.3 | -- | 82.2 | 81.6 | **15.1** | 27.0 | 0.22 | Best factuality row; Google self-report caveat; low 5h cap |
+| GLM-5.3 | 78.3 | 97.6 | 73.0 | 68.2 | 29.6 | 27.7 | 0.05 (Go) | Impl solid; expensive cache ($0.26) + 5h cap |
+| Qwen3.8 Max | 71.2 | 78.3 | 69.4 | 66.9 | 28.8 | 28.1 | 0.05 (Go) | |
+| Claude Haiku 5.5 | 69.5 | -- | 65.0 | 65.2 | 40.4 | 1.20 | 1.26 (Go) | ≤100K pricing tier |
+| GLM-5.3-Flash | 69.1 | 80.6 | 65.4 | 62.2 | -- | 3.19 | 5.6 | Reviewer/triage/main-session seat; cache $0.03; halluc unmeasured |
+| GPT-5.6 Luna | 68.0 | 74.2 | 85.3 | 86.7 | **92.6** ⚠ | 2.43 | 0.62 (Go) | Top reviewer scores, worst-in-class hallucination — 016/017 objection stands; ≤272K tier |
+| Grok 4.7 | 67.8 | 84.5 | 57.7 | 57.3 | 29.3 | 52.3 | 0.03 (Go) | ≤200K tier |
+| Qwen3.8 Flash | 67.5 | **88.1** | 66.8 | 63.6 | 45.3 | 1.84 | 1.63 (Go) | Strong implementer value |
+| DeepSeek V4.1 Flash 1017 | 65.3 | **-- unmeasured** | 61.6 | 62.1 | **96.5** ⚠ | 0.54 (peak 1.07) | **29.8** off-peak / 14.9 peak | Fleet seat — **throughput king under every cache assumption**; granular rows unpublished — vendor card only (DeepSWE 77.0, TB4.0 42.3) |
+| Muse Spark 1.3 | 63.9 | 55.9 | **87.1** | **83.9** | 32.9 | 0.32 | 18.9 (Go) | ⚠ Contributor SKU — trains on prompts/completions (Not ZDR); AA independently benchmarked |
+| GLM-5.2 | 51.1 | 58.7 | 50.5 | 47.2 | 26.3 | 27.7 | 0.22 (Go) | |
+| GPT-6 Luna | 45.6 | 6.6 | 58.2 | 58.7 | 76.7 | 1.20 | 1.26 (Go) | ≤272K tier |
+| MiniMax-M3 | 43.1 | 31.4 | 36.0 | 39.1 | 18.4 | 6.42 | 0.93 (Go) | |
+| MiMo-V2.6-Flash | 40.0 | -- | **40.1** | **39.9** | 54.4 | 0.45 | 13.5 (Go) | Former reviewer seat — weakest reviewer row on the menu |
+| DeepSeek V4 Pro (High) | 31.3 | 43.6 | 29.1 | 29.6 | 88.7 | 3.10 (peak 6.20) | 1.9 off-peak / 0.97 peak | Oracle-solid but planning-weak (008); low volume fits |
+| Qwen3.7 Plus | 28.0 | 30.4 | 32.1 | 32.5 | 27.7 | 4.70 | 1.28 (Go) | ≤256K tier |
+| MiMo-V2.5-Pro | 26.7 | 26.6 | 31.8 | 32.3 | 24.7 | 0.88 | 1.70 (Go) | |
+| Hy3 | 25.3 | 14.4 | 29.0 | 30.1 | 74.1 | 3.69 | 1.62 (Go) | |
+| Kimi K2.7 Code | 24.5 | 10.7 | 33.0 | 33.1 | 82.4 | 20.4 | 0.29 (Go) | |
+
+**Cost columns** (owner assumption 2026-10-18: 99% cache-read uniform, 1% io at 80/20
+in/out, off-peak; DS peak ×2 shown): blended $/M and solo monthly tokens
+(`listedLimit ÷ blend`; Plus cap where researched, else Go cap marked "(Go)"). Prices and
+Go limits from the console table (opencode.ai/v2/docs/console/go/, fetched 2026-10-18).
+Caveat: cache ratio is **per-model behavior**, not uniform — OpenCode's own data page puts
+glm-5.3-flash at 93% typical (our corpus: 92.8%), DS rows ~98% — and io price differs
+17× (GLM-Flash 17¢/M avg io vs MiMo-Pro 54¢). At *observed* mixes the meter weight per
+token is DS 5.4e-5 < GLM-Flash 2.2e-4 < MiMo-Pro 3.8e-4 (GLM 1.7× lighter than MiMo); at
+the uniform-99% assumption MiMo-Pro (1.5e-4) edges GLM-Flash (1.8e-4) because the
+assumption shrinks MiMo's expensive-io share. Seat decisions use observed mixes.
 
 Sub-3-point gaps are noise (harness variance — Anthropic's infrastructure-noise
 study moved TB2.0 scores by 6 points on resource config alone). Seat-repick
@@ -141,8 +152,8 @@ compare effective monthly volume (monthly listed $ limit ÷ blended $/M burn rat
 nothing else. The req/5h column is informational — never a cost input, never
 converted into monthly-equivalents. Effective volume = solo capacity, not a private
 bucket: Go enforces one shared weighted allowance ([model-tiers/005](../decisions/model-tiers/005-shared-allowance-not-buckets.md)),
-so fleet sustainability is judged against `Σ real$ ÷ listedLimit ≤ 1`, and the "$ bucket"
-columns below are solo-capacity illustrations.
+so fleet sustainability is judged against `Σ real$ ÷ listedLimit ≤ 1`, and the
+solo-throughput columns below are per-model illustrations of that allowance.
 
 ---
 

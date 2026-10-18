@@ -44,6 +44,24 @@ Practical consequence: tokens on a $60-listed model weigh 3× a $180-listed mode
 dollar; per raw token the gap widens further with the burn rate (MiMo-Pro ≈ 18× GLM-5.3-Flash
 at observed cache-heavy mix).
 
+**Price resolution (2026-10-18, later):** the console docs table
+(opencode.ai/v2/docs/console/go/, fetched 2026-10-18) **publishes cache-read for every
+model** — 036's "no cache-read price" capture was incomplete. GLM-5.3-Flash cache-read
+**$0.03/M** (its window burn triples to $13.38, matching pi-recorded exactly); MiMo-Pro
+cache **$0.003625** (the 0.036 OpenRouter placeholder was 10× high); DS-V4-Pro cache
+$0.022/0.044 peak. The meter's ±2× band collapses. Corrected window (Oct 17–18):
+meter 0.124/2d, composition **GLM-Flash 60% / MiMo-Pro 33% / DS-Flash 7%** — the big
+GLM-Flash volume (reviewers + triage + mains), not MiMo, is the largest meter consumer.
+Corrected per-token meter weights: DS 5.4e-5, GLM 2.2e-4, MiMo 3.8e-4 per token — **MiMo is
+1.7× GLM (not 18×), GLM 4.1× DS**. Corrected solo monthly throughput: **DS-Flash ≈ 13–18B
+tokens/mo is the throughput king** (cache-read priced, two sources agree exactly);
+GLM-Flash ≈ 4.5B/mo; MiMo-Pro ≈ 2.6B/mo. The earlier "GLM = throughput king" and "18×"
+claims were artifacts of GLM's unpriced cache floor + MiMo's 10× placeholder. Seat moves
+survive on direction (GLM still 1.7× lighter than MiMo on the meter, and real-$ per token
+is 1.8× HIGHER for GLM — the meter, not dollars, is the binding constraint), but the
+magnitude rationale in 038 is superseded by this note. Window thresholds per the docs:
+5h = 20% of the allowance, weekly = 50%, monthly = 100%.
+
 **Files changed:** this record, `decisions/model-tiers/README.md`, `docs/model-role-scores.md`
 (cost-methodology note), `docs/TODO.md` (bucket wording). Measurement tool
 (`docs/data/seat_burn.py`, WO-2026-053) reports the meter.
