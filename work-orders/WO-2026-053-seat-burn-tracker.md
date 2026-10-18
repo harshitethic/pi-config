@@ -123,6 +123,12 @@ Pi session logs (`~/.pi/agent/sessions/**/*.jsonl`) record per-assistant-message
 
 **Relevant decisions**: `decisions/model-tiers/004` (cost metric: monthly cap only; effective volume = bucket ÷ blended $/M — this tool computes factual $ burn per class instead, which feeds that metric), `decisions/subagents/036` (Go fleet, buckets, peak windows), `decisions/subagents/031` (orchestrator model inheritance — why the session model carries orchestrator traffic), `decisions/subagents/037` (current seat map).
 
+### Amendment 2026-10-18 (pre-landing) — shared-allowance mechanism
+
+Research landed mid-implementation: Go enforcement is **one shared normalized allowance**, not per-model buckets (opencode `console` source: `quotaCost = round(cost × costMultiplier)` accumulates into a single per-workspace counter; support quote: github.com/anomalyco/opencode#54875 — "The 'Monthly limit' for each model is how much of that model alone you could use with the full allowance. It is not a separate budget"). Per-model monthly figures are **solo-capacity** illustrations. The plan-wide monthly meter is `Σ (real$ on model m ÷ listedLimit_m) ≤ 1` (the plan-wide constant cancels). Enforcement at limit = HTTP 429 hard block until window reset (no grace margin; optional console "Use balance" PAYG fallback). The 5h window is an anchored reset, not a sliding window.
+
+Spec addition to step 7 output (steered to the implementer in-flight): keep the per-model ledger but label it **solo capacity**; add a **plan-wide meter** row: `Σ real$ ÷ listedLimit` for the window, month-projected at observed pace, vs 1.0, noting the `/zen/go/v1/usage` monthly % as the server-side cross-check. Price table gains `listedLimit` per model (Go Plus: DS V4.1 Flash 160, GLM-5.3-Flash 180, DS V4 Pro 60, MiMo-V2.6-Pro 60).
+
 ### Completion Report Format
 
 Standard: status / invariant_exhaustiveness / files_modified / tests / structural_checks / deviations_from_spec / notes_for_orchestrator. Plus (review_policy: required): assumptions_made, unexpected_changes, issues_encountered, test_coverage, adversarial_reviews, review_cap_reached, accepted_notes. Include the real-run numbers (per-seat shares, bucket ledger) and the two enumeration deliverables verbatim.
