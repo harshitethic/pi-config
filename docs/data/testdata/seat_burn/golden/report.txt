@@ -1,5 +1,5 @@
 SEAT BURN — pi session-log token accounting by seat, model and OpenCode Go plan
-window: 2026-05-01..2026-05-03 UTC (3 days, 16 assistant messages)
+window: 2026-05-01..2026-05-03 UTC (3 days, 17 assistant messages)
 sessions: <SESSIONS>
 spawn records: <META> (pi-subagent-<session-id>.meta.json)
 NOTE: some token classes have no published price; those tokens are reported and excluded from $ burn (see PRICES + data quality).
@@ -8,7 +8,7 @@ NOTE: some token classes have no published price; those tokens are reported and 
 date       seat                                               raw tokens      cache rd   cache wr      in+out    $ burn
 2026-05-01 ambiguous:review-code|review-plan|review-tests          6,100         5,000          0       1,100  0.000200
 2026-05-01 implement                                                 110             0          0         110  0.000042
-2026-05-01 main-session                                           40,501        33,060      1,000       6,441    0.0018
+2026-05-01 main-session                                           40,721        33,060      1,000       6,661    0.0018
 2026-05-01 math-algo-oracle                                       11,100        10,000          0       1,100  0.000858
 2026-05-01 orchestrator                                            6,100         5,000          0       1,100  0.000450
 2026-05-02 main-session                                           11,100        10,000          0       1,100  0.000240
@@ -21,17 +21,18 @@ date       model                         route             raw tokens      cache
 2026-05-01 deepseek-v4.1-flash           openrouter             1,110            60       1,050  0.000180
 2026-05-01 deepseek-v4.1-flash-1017      openrouter             6,100         5,000       1,100  0.000450
 2026-05-01 glm-5.3-flash                 opencode-go            8,650         7,000       1,650  0.000300
+2026-05-01 glm-5.3-flash                 zai                      220             0         220  0.000040
 2026-05-02 deepseek-v4.1-flash           opencode-go           11,100        10,000       1,100  0.000240
 2026-05-03 deepseek-v4.1-flash           opencode-go           11,100        10,000       1,100  0.000240
 
 == window summary: seats ==
 seat                                               raw tokens   tok %    $ burn     $ %      pi $   msgs  attribution
-main-session                                           62,701   72.8%    0.0023   59.3%  0.000820     12  filename
-math-algo-oracle                                       11,100   12.9%  0.000858   22.5%         0      1  signature
+main-session                                           62,921   72.9%    0.0023   59.7%  0.000820     13  filename
+math-algo-oracle                                       11,100   12.9%  0.000858   22.3%         0      1  signature
 ambiguous:review-code|review-plan|review-tests          6,100    7.1%  0.000200    5.2%         0      1  ambiguous:review-code|review-plan|review-tests
-orchestrator                                            6,100    7.1%  0.000450   11.8%         0      1  signature
+orchestrator                                            6,100    7.1%  0.000450   11.7%         0      1  signature
 implement                                                 110    0.1%  0.000042    1.1%  0.000042      1  meta
-TOTAL                                                  86,111  100.0%    0.0038  100.0%  0.000862     16
+TOTAL                                                  86,331  100.0%    0.0038  100.0%  0.000862     17
 
 == window summary: models ==
 model                         route             raw tokens  cache %    $ burn      pi $  price note
@@ -40,6 +41,7 @@ deepseek-v4-pro               opencode-go           11,100    90.1%  0.000858   
 glm-5.3-flash                 opencode-go            8,650    80.9%  0.000300  0.000100  unpriced: cache_read,cache_write
 deepseek-v4.1-flash-1017      openrouter             6,100    82.0%  0.000450         0  peak ×2 applied unpriced: cache_write
 deepseek-v4.1-flash           openrouter             1,110     5.4%  0.000180         0  unpriced: cache_write
+glm-5.3-flash                 zai                      220     0.0%  0.000040         0  unpriced: cache_read,cache_write
 
 == OpenCode Go plan: per-model solo capacity (illustrative, NOT separate budgets) ==
 one shared monthly allowance; the console meters Σ(real $ on model m ÷ solo
@@ -60,18 +62,19 @@ PLAN-WIDE METER  Σ(real $ on model m ÷ solo capacity_m) over the window: 0.000
   projection = window $ burn / 3 days × 30
 
 == headline ==
-session+orchestrator seats = 79.9% of raw tokens, 71.1% of $ burn
-  (68,801 raw tokens, $0.0027 list-price burn, $0.000820 as charged by pi [95.1%])
-  month-projected at observed pace: $0.0271 vs mimo-v2.6-pro's solo capacity ($60) → fits (0.1% of it)
+session+orchestrator seats = 80.0% of raw tokens, 71.4% of $ burn
+  (69,021 raw tokens, $0.0027 list-price burn, $0.000820 as charged by pi [95.1%])
+  month-projected at observed pace: $0.0275 vs mimo-v2.6-pro's solo capacity ($60) → fits (0.1% of it)
   plan-wide meter for these seats: 0.000129 month-projected (0.0% of the allowance, 45.2% of the whole plan meter)
 
 == data quality ==
 files scanned: 10 (+0 *.pre-* backups skipped), unreadable: 0, unparseable lines: 0
-entry types seen in the scanned corpus: compaction=1, message=23, model_change=12, session=10, thinking_level_change=7
+entry types seen in the scanned corpus: compaction=1, message=24, model_change=13, session=10, thinking_level_change=7
 duplicate entry ids dropped (replay/branching, in window): 3
 assistant messages without usage (in window): 2; without totalTokens: 1; totalTokens ≠ Σclasses: 0; bad timestamps: 0
+messages without an envelope provider: 1 (model_change: 1, model-id prefix: 0, unknown: 0)
 spawn records joined: 1; without agentName: 0; unreadable: 0
-attribution: ambiguous:review-code|review-plan|review-tests=1, filename=12, meta=1, signature=2
+attribution: ambiguous:review-code|review-plan|review-tests=1, filename=13, meta=1, signature=2
 unattributed: 6,100 raw tokens (7.1%), $0.000200 burn (5.2%) — includes ambiguous groups
   ambiguous group ambiguous:review-code|review-plan|review-tests  [glm-5.3-flash:high]  1 messages
 unpriced token classes (excluded from $ burn):
@@ -84,7 +87,7 @@ pi-recorded cost (all providers, as charged): $0.000862 vs list-price burn $0.00
   deepseek-v4-pro ← deepseek-v4-pro  [opencode-go]
   deepseek-v4.1-flash ← deepseek-v4.1-flash, deepseek/deepseek-v4.1-flash  [opencode-go, openrouter]
   deepseek-v4.1-flash-1017 ← deepseek/deepseek-v4.1-flash-1017  [openrouter]
-  glm-5.3-flash ← glm-5.3-flash  [opencode-go]
+  glm-5.3-flash ← glm-5.3-flash  [opencode-go, zai]
 
 == seat signature table (derived from agents/*.md + settings.json) ==
   implement          deepseek-v4.1-flash    :high    exact   agents/implement.md frontmatter model

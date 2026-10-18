@@ -422,6 +422,7 @@ def scan_sessions(sessions_dir, since, until, q):
             seen_ids = set()
             level = None
             cur_model = None
+            cur_provider = None
             try:
                 fh = open(os.path.join(dirpath, name), encoding="utf-8", errors="replace")
             except OSError:
@@ -447,6 +448,7 @@ def scan_sessions(sessions_dir, since, until, q):
                         continue
                     if etype == "model_change":
                         cur_model = entry.get("modelId")
+                        cur_provider = entry.get("provider")
                         continue
                     if etype != "message":
                         continue
@@ -474,7 +476,21 @@ def scan_sessions(sessions_dir, since, until, q):
                         continue
                     raw_model = msg.get("model") or cur_model
                     canon = canonical_model(raw_model)
-                    provider = msg.get("provider") or "unknown"
+                    # Provider order: the message envelope (always present in the
+                    # real corpus), then the last model_change, then a routing
+                    # prefix on the model id.
+                    provider = msg.get("provider")
+                    if not provider:
+                        q["messages_without_provider"] += 1
+                        if cur_provider:
+                            provider = cur_provider
+                            q["provider_from_model_change"] += 1
+                        elif raw_model and "/" in raw_model:
+                            provider = raw_model.split("/", 1)[0]
+                            q["provider_from_prefix"] += 1
+                        else:
+                            provider = "unknown"
+                            q["provider_unknown"] += 1
                     # The spelling inventory describes the whole corpus, so it is
                     # recorded before the window filter drops the record.
                     spellings[canon].add(raw_model or canon)
@@ -793,6 +809,10 @@ def build_report(opts):
             "bad_lines": q["bad_lines"],
             "duplicate_ids_dropped": q["dup_ids_dropped"],
             "messages_without_usage": q["no_usage"],
+            "messages_without_provider": q["messages_without_provider"],
+            "provider_from_model_change": q["provider_from_model_change"],
+            "provider_from_prefix": q["provider_from_prefix"],
+            "provider_unknown": q["provider_unknown"],
             "messages_without_total_tokens": q["no_total_tokens"],
             "total_tokens_mismatch": q["total_mismatch"],
             "bad_timestamps": q["bad_timestamps"],
@@ -988,6 +1008,12 @@ def render_text(rep):
         f"without totalTokens: {_num(dq['messages_without_total_tokens'])}; "
         f"totalTokens ≠ Σclasses: {_num(dq['total_tokens_mismatch'])}; "
         f"bad timestamps: {_num(dq['bad_timestamps'])}")
+    if dq["messages_without_provider"]:
+        add(f"messages without an envelope provider: "
+            f"{_num(dq['messages_without_provider'])} (model_change: "
+            f"{_num(dq['provider_from_model_change'])}, model-id prefix: "
+            f"{_num(dq['provider_from_prefix'])}, unknown: "
+            f"{_num(dq['provider_unknown'])})")
     add(f"spawn records joined: {_num(dq['meta_files'])}; without agentName: "
         f"{_num(dq['meta_without_agent'])}; unreadable: {_num(dq['meta_unreadable'])}"
         + (f"; meta dir missing: {dq['meta_dir_missing']}" if dq["meta_dir_missing"] else ""))
@@ -1216,10 +1242,14 @@ def selftest():
         # Same model, bare and provider-prefixed: one canonical id, two routes.
         got = {(row["model"], row["route"]): row["raw_tokens"] for row in r["models"]}
         assert got == {("deepseek-v4.1-flash", "openrouter"): 1110,
-                       ("deepseek-v4.1-flash", GO_PROVIDER): 111}, got
+                       ("deepseek-v4.1-flash", GO_PROVIDER): 111,
+                       # m-c carries no envelope provider: routed by model_change
+                       ("glm-5.3-flash", "zai"): 220}, got
         inv = {row["model"]: row["spellings"] for row in r["spelling_inventory"]}
         assert inv["deepseek-v4.1-flash"] == ["deepseek-v4.1-flash",
                                              "deepseek/deepseek-v4.1-flash"], inv
+        assert r["data_quality"]["messages_without_provider"] == 1, r["data_quality"]
+        assert r["data_quality"]["provider_from_model_change"] == 1, r["data_quality"]
 
     case("6 bare vs provider-prefixed spellings merged", case6)
 
