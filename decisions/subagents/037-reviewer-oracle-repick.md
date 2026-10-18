@@ -7,7 +7,7 @@ date: 2026-10-18
 
 # Seat repick on the OpenCode Go menu (037)
 
-**What:** Two seat changes after the model-tiers/002 scorechart (owner rulings,
+**What:** Two seat changes after the model-tiers/003 scorechart (owner rulings,
 2026-10-18). The implementer stays on `opencode-go/deepseek-v4.1-flash:high` — the
 DS bucket ($160/mo on Go Plus) is sized for the fleet's largest volume seat and the
 owner explicitly keeps it there. Orchestrator tracks the caller's model (031) with

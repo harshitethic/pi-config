@@ -8,7 +8,7 @@ Model rows include thinking-level variants where BenchLM publishes them
 (DeepSeek rows: High/Max).
 
 Benchmark weights follow the 2026-10-18 integrity review (decision
-model-tiers/002): SWE-bench Verified dropped (OpenAI abandoned it — ~59% flawed
+model-tiers/003): SWE-bench Verified dropped (OpenAI abandoned it — ~59% flawed
 tests, contaminated); SWE-bench Pro kept at reduced weight (verifier
 false-negatives ~24-32%, git-history gold-commit exploit inflates some rows);
 Terminal-Bench scored at 4.0 (2.x is stale and cross-version incomparable);
@@ -76,7 +76,7 @@ REG = [
     ("GPT-5.4 nano", "OpenAI", "GPT-5.4 nano", "openai/gpt-5.4-nano", 400, True),
     ("MiMo-V2.5", "Xiaomi", "MiMo-V2.5", "xiaomi/mimo-v2.5", 1048, True),
     ("Kimi K3", "Moonshot", "Kimi K3", "moonshotai/kimi-k3", 1048, True),
-    # 2026-10-18 integrity review: OpenCode Go menu SKUs added (decision model-tiers/002).
+    # 2026-10-18 integrity review: OpenCode Go menu SKUs added (decision model-tiers/003).
     ("GLM-5.3", "Zhipu", "GLM-5.3", "z-ai/glm-5.3", 1048, False),
     ("GLM-5.3-Flash", "Zhipu", "GLM-5.3-Flash", "z-ai/glm-5.3-flash", 1048, False),
     ("MiMo-V2.6-Flash", "Xiaomi", "MiMo-V2.6-Flash", "xiaomi/mimo-v2.6-flash", 1048, False),
@@ -307,7 +307,7 @@ table(VRES, VALUE, f"PRIMARY: value tier, {len(VALUE)} rows (flagships excluded)
 reviewer_view(VALUE)
 oracle_detail(VALUE)
 GRES = compute(GO_MENU)
-table(GRES, GO_MENU, "OPENCODE GO MENU (decision model-tiers/002, 2026-10-18)")
+table(GRES, GO_MENU, "OPENCODE GO MENU (decision model-tiers/003, 2026-10-18)")
 reviewer_view(GO_MENU, GRES)
 table(FRES, list(DATA), f"APPENDIX: full frontier, all {len(DATA)} rows")
 

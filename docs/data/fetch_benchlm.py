@@ -17,7 +17,7 @@ publishes no variant split); AA-Intelligence has a BenchLM variant split.
 role_scores.py merges this snapshot with the manual framia dict (LiveCodeBench,
 IMO/HMMT — BenchLM does not track those for DeepSeek).
 
-Benchmark-set policy (integrity review, 2026-10-18 — decision model-tiers/002):
+Benchmark-set policy (integrity review, 2026-10-18 — decision model-tiers/003):
 SWE-bench Verified dropped (OpenAI abandoned it: ~59% flawed tests, contaminated);
 SWE-bench Pro kept but discounted in composites (verifier false-negatives ~24-32%,
 git-history gold-commit exploit); Terminal-Bench scored at 4.0 only (semantic

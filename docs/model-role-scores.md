@@ -94,7 +94,7 @@ per-benchmark pages + OpenRouter `/models` + `/benchmarks`, all fetched 2026-07-
 
 ---
 
-## 2026-10-18 scorechart — OpenCode Go menu (decision model-tiers/002)
+## 2026-10-18 scorechart — OpenCode Go menu (decision model-tiers/003)
 
 Fresh composites after the benchmark-set integrity review: SWE-bench Verified
 dropped, SWE-bench Pro discounted, Terminal-Bench 4.0 (2.0 was two majors stale),
