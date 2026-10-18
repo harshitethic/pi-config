@@ -9,6 +9,32 @@ files unrelated work items all had to touch). Delta-based — no absolute
 thresholds. Each audit runs as `scout-code` over the delta since the previous
 entry; the ranked candidates feed the next chunk's sequence before feature work.
 
+## 2026-10-18 — chunk: OpenCode Go usage footer (`d4cd160..` this landing)
+
+1 landing: OpenCode Go plan usage in the footer's provider-quota slot
+(`extensions/footer-session-id.ts` Go section + `tests/footer-opencode-usage.test.ts`),
+per `decisions/external-tools/006`.
+
+### Growth
+
+| file | now | base (`d4cd160`) | Δ |
+|---|---|---|---|
+| `extensions/footer-session-id.ts` | 1633 | 1456 | **+177** (file already on the large-file watchlist — see 2026-10-03 entry) |
+| `tests/footer-opencode-usage.test.ts` | 240 | — | +240 (new) |
+
+### Unification
+
+- z.ai/MiniMax percent-color thresholds were two inline IIFEs; now one
+  `colorUsedPct` helper at three call sites (the new Go renderer included).
+- Go usage renders through the existing quota segment slot + refresh cycle
+  (`refreshQuotaNow`) rather than a parallel footer mechanism; a standalone
+  extension could not compose into the footer anyway (single `setFooter` owner).
+
+**Extraction candidate carried forward:** the quota/z.ai/MiniMax/Go block
+(~400 lines of fetch + normalize + render) is the natural split of
+`footer-session-id.ts` into `extensions/lib/quota.ts` if the file keeps growing;
+deferred until a second consumer or another provider lands.
+
 ## 2026-10-13 — chunk: todo extension retired (`126d9bf..` this landing)
 
 1 landing: the `todo` tool, widget and `/todos` command removed
