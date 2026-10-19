@@ -45,3 +45,4 @@ date: 2026-07-14
 | 036 | DeepSeek fleet rides the OpenCode Go plan quota (`opencode-go/deepseek-v4.1-flash`; V4 Pro-style $15 buckets avoided) | done |
 | 037 | Reviewers → `opencode-go/glm-5.3-flash:high` (023 experiment superseded); oracle → `opencode-go/deepseek-v4-pro:max` | done |
 | 038 | Main session → `opencode-go/glm-5.3-flash` (meter-driven); multi-session orchestrator split | done |
+| 039 | Owner state by row id (`owner_asks` gate, `nextSteps` bar) + checkpoint recoverability (in-flight record, worktree lock/reap, four-state status) | done |

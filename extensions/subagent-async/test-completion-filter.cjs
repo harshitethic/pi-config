@@ -273,6 +273,14 @@ function branchExists(parentDir, branchName) {
 }
 
 function postDeliveryCleanupMirror(parentDir, result, finalCommit) {
+	// R3-2 (tfd process-controls, owner 2026-10-19): unlock first — git refuses
+	// force-remove of a locked tree. Mirrors index.ts; the lock/unlock/reap
+	// matrix itself lives in test-worktree-lock.cjs and tests/subagent-worktree-lock.test.ts.
+	try {
+		execFileSync("git", ["worktree", "unlock", result.worktreePath], { cwd: parentDir, stdio: "ignore" });
+	} catch {
+		/* not locked — the one tolerated unlock failure */
+	}
 	execFileSync("git", ["worktree", "remove", "--force", result.worktreePath], {
 		cwd: parentDir, stdio: "ignore",
 	});

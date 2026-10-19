@@ -309,6 +309,11 @@ Your final message — what your dispatcher receives — must include:
 ```
 **status:** complete | blocked | partial
 
+**owner_asks:** none, or `<file>#<id>` row ids (comma-separated)
+  (Every ask addressed to the owner from this report goes to the registry
+  first; name its row here. Free text, or a missing line, is refused by the
+  harness — reissue with the row id, or `none`.)
+
 **chunk:** the chunk id or one-line spec
 
 **files_merged:** list of files changed + the merge commit hash
