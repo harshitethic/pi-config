@@ -795,9 +795,10 @@ interface RunningSubagent {
 	// Resolved stage-2 timeout for this child (undefined → 30-min default;
 	// 0/negative/NaN → disabled). Per-spawn; no global setting.
 	silenceTimeoutMs: number;
-	// Kill source for the delivered marker: "kill-tool" (subagent_kill) or
-	// "progress-timeout" (stage-2 auto-kill). Null until killedExplicitly.
-	killedVia: "kill-tool" | "progress-timeout" | null;
+	// Kill source for the delivered marker: "kill-tool" (subagent_kill),
+	// "progress-timeout" (stage-2 auto-kill), or "turn-limit" (the
+	// MAX_TURNS_HARD stop). Null until killedExplicitly.
+	killedVia: "kill-tool" | "progress-timeout" | "turn-limit" | null;
 }
 
 const running = new Map<string, RunningSubagent>();
@@ -2280,13 +2281,17 @@ async function spawnSubagent(
 					}
 				}
 
-				// Hard turn limit
+				// Hard turn limit — routes through the shared kill dispatch
+				// (dispatchKillSignals), NOT a bare proc.kill: the close handler is
+				// the single owner of delivery and reads killedExplicitly/killedVia
+				// to prepend the kill marker; a bare kill delivers the child's last
+				// message as a normal completion (and escapes the killed/stopped
+				// skips, e.g. the owner_asks gate).
 				if (rs.progress.turns >= MAX_TURNS_HARD) {
 					rs.progress.currentActivity = `hit turn limit (${MAX_TURNS_HARD}), stopping`;
 					rs.progress.errors.push(`Turn limit reached (${MAX_TURNS_HARD})`);
-					debugLog("turn-limit hit, killing proc");
-					proc.kill("SIGTERM");
-					setTimeout(() => { if (!proc.killed) proc.kill("SIGKILL"); }, HARD_KILL_DELAY_MS);
+					debugLog("turn-limit hit, dispatching kill");
+					dispatchKillSignals(rs, "turn-limit");
 					return;
 				}
 
@@ -2957,7 +2962,7 @@ function fireSilenceKill(rs: RunningSubagent): void {
  *  (recovered/pre-reload session) — callers must distinguish that from a
  *  raced exit. Exported as an @internal test hook so the kill paths can be
  *  exercised with stubbed procs. */
-export function dispatchKillSignals(rs: RunningSubagent, via: "kill-tool" | "progress-timeout"): { alreadyDead: boolean; noProcess?: boolean } {
+export function dispatchKillSignals(rs: RunningSubagent, via: "kill-tool" | "progress-timeout" | "turn-limit"): { alreadyDead: boolean; noProcess?: boolean } {
 	// Order matters: set the flags BEFORE any proc access or signal so the
 	// close handler observes them on entry — including the null-proc
 	// (recovered/pre-reload) path below.
@@ -2976,7 +2981,7 @@ export function dispatchKillSignals(rs: RunningSubagent, via: "kill-tool" | "pro
 	if (rs.staleTimer) { clearTimeout(rs.staleTimer); rs.staleTimer = null; }
 	if (rs.silenceTimer) { clearTimeout(rs.silenceTimer); rs.silenceTimer = null; }
 
-	const viaLabel = via === "progress-timeout" ? "progress-timeout" : "subagent_kill";
+	const viaLabel = via === "kill-tool" ? "subagent_kill" : via;
 
 	// Recovered/pre-reload sessions are reconstructed from disk with a null
 	// proc (session_start re-attach — `proc: null` in that path); there is
@@ -3019,12 +3024,15 @@ export function dispatchKillSignals(rs: RunningSubagent, via: "kill-tool" | "pro
 }
 
 /** Marker prefix for a delivered kill result. Mirrors the `subagent_kill`
- *  marker; the stage-2 variant is greppable as `[Killed via progress-timeout]`. */
+ *  marker; the stage-2 variant is greppable as `[Killed via progress-timeout]`
+ *  and the turn-limit variant as `[Killed via turn-limit]`. */
 function killedMarker(rs: RunningSubagent): string | null {
 	if (!rs.killedExplicitly) return null;
-	return rs.killedVia === "progress-timeout"
-		? "[Killed via progress-timeout — process terminated, work in this subagent is lost]"
-		: "[Killed via subagent_kill — process terminated, work in this subagent is lost]";
+	if (rs.killedVia === "progress-timeout")
+		return "[Killed via progress-timeout — process terminated, work in this subagent is lost]";
+	if (rs.killedVia === "turn-limit")
+		return "[Killed via turn-limit — process terminated, work in this subagent is lost]";
+	return "[Killed via subagent_kill — process terminated, work in this subagent is lost]";
 }
 
 /** Close-handler delivery decision — the single owner of result delivery
