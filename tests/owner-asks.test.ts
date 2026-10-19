@@ -224,6 +224,19 @@ const waitFor = async (ready: () => boolean, ms = 20_000): Promise<void> => {
 };
 
 describe("owner asks: pi extension wiring", () => {
+	it("does not register handlers in a subagent session (the depth guard)", () => {
+		const saved = process.env.PI_SUBAGENT_DEPTH;
+		process.env.PI_SUBAGENT_DEPTH = "1";
+		try {
+			const handlers: Record<string, unknown> = {};
+			loadExtension({ on: (event: string, handler: unknown) => { handlers[event] = handler; } } as never);
+			expect(Object.keys(handlers)).toHaveLength(0);
+		} finally {
+			if (saved === undefined) delete process.env.PI_SUBAGENT_DEPTH;
+			else process.env.PI_SUBAGENT_DEPTH = saved;
+		}
+	});
+
 	it("clears the status outside a registry repo, and /asks reports that instead of acking", async () => {
 		const handlers: Record<string, (event: unknown, ctx: unknown) => unknown> = {};
 		const commands: Record<string, { handler: (args: string, ctx: unknown) => Promise<void> }> = {};
