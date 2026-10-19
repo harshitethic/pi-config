@@ -207,3 +207,42 @@ doc/decision note on "E2E mandatory for createWorktree changes".
 6. 035 edit scout → branch commit contains ONLY the edited handoff
    (EDITED-BY-E2E-SUBAGENT); untouched carried files absent. Verification
    steps 1-7 of the original spec: complete. E2E scratch artifacts cleaned.
+
+# Process-controls harness work (tfd rulings 2026-10-19)
+
+Ruling record: tfd `docs/reviews/process-controls.md` R3–R6 (owner 2026-10-19), family policy
+with R8 (owner 2026-10-08: mechanical registry-tool gate, never a text heuristic).
+
+- **WO-2026-054 (R3+R4+R6) — in flight 2026-10-19**, implementer `subagent-b04ea6e6` (reserved
+  at `ba5e9b3`). Checkpoint in-flight-subagent registry; worktree lock/unlock lifecycle + orphan
+  reap on resume; four-state status vocabulary; `owner_asks` completion-report field with the
+  delivery-funnel gate (free text and missing field refused); checkpoint `nextSteps` owner-state
+  bar (same-paragraph row id). On landing: decision `subagents/039-*` (mechanism record; the
+  number is reserved for this landing).
+- **R8 — queued, dispatch after 054 merges.** Mechanical, post-hoc gate; shape per the peer
+  (2026-10-19): `message_end` steer on the review-gate soft-prompt precedent,
+  `extensions/subagent-async`. Builds on 054's `owner_asks` validator (row-id form + registry
+  existence). Follow-up WO against the post-054 tree.
+- **R5 — not ours**: tfd `scripts/docs_validate.py`, now tfd WO-2026-264 (`1b40b61c`).
+
+# Reviewer-tier repick — pending owner go (2026-10-19)
+
+Analysis complete; cost metric per owner ruling 2026-10-19: **estimated MTok/month** (=
+model-tiers/004 effective monthly volume; meter weight drops out of comparisons — doc update
+rides the landing WO). Data-privacy ruling 2026-10-19: Xiaomi acceptable, Meta not (Muse
+Contributor closed; `-free` train-on-data SKUs closed; paid MiMo Go SKU is "Not used / 0 days").
+Candidates (MTok/mo, review scores, trust): GLM-5.3-Flash 4,550 (65/62, clean) · MiMo-V2.6-Flash
+9,450 (40/40 vendor rows; Vals reward-hacking finding) · MiMo-V2.6-Pro 2,400 (capacity-poor,
+fails demand) · Muse Contributor 15,200 (ruled out, Meta). Independent comparators split
+(Vals favors MiMo, AA favors GLM and flags its MiMo rows estimate-grade); MiMo V2.6 has no
+independent agentic-coding rows. Outcome evidence: 023 review window (Flash matched peers) and
+2026-10-18/19 TFD orchestrator window on Pro (930 turns, sound; 2× slower turns; clustered
+opencode-go 500s on the MiMo endpoint — SKU stability a watch item).
+
+**Recommendation, awaiting owner go:** review tier → `opencode-go/mimo-v2.6-flash`, measured
+trial with GLM-5.3-Flash control arm (023-style dual-run verdicts), pre-registered revert rule
+(missed defects / fabricated citations / pushback regression → revert to `glm-5.3-flash`).
+Landing WO also carries: 038 seat-assignment fix (TFD orchestrators deliberately on
+`mimo-v2.6-pro` per owner 2026-10-19 — supersession note + 10-21 `seat_burn` recheck reads
+MiMo orchestrators, not GLM), reviewer-vs-main-session GLM attribution via `seat_burn.py`, and
+the MTok/month metric doc update. Decision number for this landing: `subagents/040-*`.
