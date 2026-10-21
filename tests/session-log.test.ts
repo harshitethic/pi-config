@@ -15,6 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import loadExtension from "../extensions/session-log/index.ts";
 import { findSessionLogScript, HOOK_TIMEOUT_MS, runSessionLogHook } from "../extensions/session-log/lib.ts";
+import { scrubSubagentEnv } from "./helpers/subagent-env.ts";
 
 const CLI = join(import.meta.dir, "..", "extensions", "session-log", "external.ts");
 
@@ -38,12 +39,11 @@ let failing: string;
 
 // A subagent session inherits PI_SUBAGENT_DEPTH, and index.ts skips itself when
 // it is set — so the suite must be green from inside a subagent, where the
-// reviewers run. Snapshot, sanitize in beforeAll, restore in afterAll
-// (tests/subagent-nesting.test.ts uses the same pattern).
-const savedSubagentDepth = process.env.PI_SUBAGENT_DEPTH;
+// reviewers run. Snapshot/unset here, restore in afterAll (tests/helpers/subagent-env.ts).
+let restoreSubagentEnv: () => void = () => {};
 
 beforeAll(async () => {
-	delete process.env.PI_SUBAGENT_DEPTH;
+	restoreSubagentEnv = scrubSubagentEnv();
 	repo = await realpath(await mkdtemp(join(tmpdir(), "session-log-repo-")));
 	bare = await realpath(await mkdtemp(join(tmpdir(), "session-log-bare-")));
 	failing = await realpath(await mkdtemp(join(tmpdir(), "session-log-fail-")));
@@ -54,8 +54,7 @@ beforeAll(async () => {
 	await writeFile(join(failing, "scripts", "session_log.py"), "import sys\nsys.exit(3)\n");
 });
 afterAll(async () => {
-	if (savedSubagentDepth === undefined) delete process.env.PI_SUBAGENT_DEPTH;
-	else process.env.PI_SUBAGENT_DEPTH = savedSubagentDepth;
+	restoreSubagentEnv();
 	for (const dir of [repo, bare, failing]) {
 		try {
 			await rm(dir, { recursive: true, force: true });
@@ -265,15 +264,14 @@ describe("pi extension wiring", () => {
 	}, 15_000);
 
 	it("does not register handlers in a subagent session", () => {
-		const saved = process.env.PI_SUBAGENT_DEPTH;
+		const restore = scrubSubagentEnv();
 		process.env.PI_SUBAGENT_DEPTH = "1";
 		try {
 			const handlers = new Map<string, unknown>();
 			loadExtension({ on: (event: string, handler: unknown) => handlers.set(event, handler) } as any);
 			expect(handlers.size).toBe(0);
 		} finally {
-			if (saved === undefined) delete process.env.PI_SUBAGENT_DEPTH;
-			else process.env.PI_SUBAGENT_DEPTH = saved;
+			restore();
 		}
 	});
 

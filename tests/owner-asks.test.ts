@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import loadExtension from "../extensions/owner-asks/index.ts";
 import { ack, attention, countText, list, ownerAsks } from "../extensions/owner-asks/lib.ts";
+import { childEnv, scrubSubagentEnv } from "./helpers/subagent-env.ts";
 
 const CLI = join(import.meta.dir, "..", "extensions", "owner-asks", "external.ts");
 
@@ -97,17 +98,15 @@ const ASKS_AB = "docs/reviews/a.md  A1  soon  first\ndocs/reviews/a.md  A2  soon
 // The extension skips registration under a subagent (index.ts's PI_SUBAGENT_DEPTH
 // guard), and one test spawns a `bun -e` subprocess that inherits the var — so the
 // suite must sanitize it to be green from inside a subagent, where the reviewers
-// run. Snapshot, delete in beforeAll, restore in afterAll (the same pattern as
-// tests/session-log.test.ts and tests/subagent-nesting.test.ts).
-const savedSubagentDepth = process.env.PI_SUBAGENT_DEPTH;
+// run. Snapshot/unset in beforeAll, restore in afterAll (tests/helpers/subagent-env.ts).
+let restoreSubagentEnv: () => void = () => {};
 
 beforeAll(() => {
-	delete process.env.PI_SUBAGENT_DEPTH;
+	restoreSubagentEnv = scrubSubagentEnv();
 });
 
 afterAll(() => {
-	if (savedSubagentDepth === undefined) delete process.env.PI_SUBAGENT_DEPTH;
-	else process.env.PI_SUBAGENT_DEPTH = savedSubagentDepth;
+	restoreSubagentEnv();
 	for (const dir of tmpRoots) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -192,7 +191,7 @@ describe("owner asks: statusline CLI", () => {
 	const statusline = (input: object, home: string) =>
 		spawnSync(process.execPath, [CLI, "statusline"], {
 			input: JSON.stringify(input),
-			env: { ...process.env, HOME: home },
+			env: childEnv({ HOME: home }),
 			encoding: "utf8",
 		});
 
@@ -225,15 +224,14 @@ const waitFor = async (ready: () => boolean, ms = 20_000): Promise<void> => {
 
 describe("owner asks: pi extension wiring", () => {
 	it("does not register handlers in a subagent session (the depth guard)", () => {
-		const saved = process.env.PI_SUBAGENT_DEPTH;
+		const restore = scrubSubagentEnv();
 		process.env.PI_SUBAGENT_DEPTH = "1";
 		try {
 			const handlers: Record<string, unknown> = {};
 			loadExtension({ on: (event: string, handler: unknown) => { handlers[event] = handler; } } as never);
 			expect(Object.keys(handlers)).toHaveLength(0);
 		} finally {
-			if (saved === undefined) delete process.env.PI_SUBAGENT_DEPTH;
-			else process.env.PI_SUBAGENT_DEPTH = saved;
+			restore();
 		}
 	});
 
@@ -303,10 +301,10 @@ describe("owner asks: pi extension wiring", () => {
 			await handlers.session_start({}, { cwd: ${JSON.stringify(root)}, hasUI: false, ui: {} });
 		`;
 		// Bun's spawnSync without an explicit env option gives the child the
-		// STARTUP env snapshot — process.env deletions (beforeAll) never reach it,
-		// so pass the live (sanitized) env explicitly or the child's own depth
-		// guard fires and the extension registers no handlers.
-		const run = spawnSync(process.execPath, ["-e", code], { encoding: "utf8", timeout: 10_000, env: { ...process.env } });
+		// STARTUP env snapshot — the scrub's deletions never reach it, so hand the
+		// child the live env (`childEnv`), or its own depth guard fires and the
+		// extension registers no handlers.
+		const run = spawnSync(process.execPath, ["-e", code], { encoding: "utf8", timeout: 10_000, env: childEnv() });
 		expect(run.error).toBeUndefined();
 		expect(run.status).toBe(0);
 	}, 30_000);
@@ -363,7 +361,7 @@ describe("owner asks: work-order departures", () => {
 		const { root } = makeRepo(ASKS_AB, { unruled: "WO-2026-001 D1 x\n" });
 		const out = spawnSync(process.execPath, [CLI, "statusline"], {
 			input: JSON.stringify({ cwd: root }),
-			env: { ...process.env, HOME: tmp("home") },
+			env: childEnv({ HOME: tmp("home") }),
 			encoding: "utf8",
 		});
 		expect(out.stdout).toBe(`${basename(root)} · main · \x1b[33mowner asks: 2 open · 1 unruled departure\x1b[0m\n`);

@@ -33,6 +33,7 @@ import subagentFactory, {
 	resolveChildModel,
 } from "../extensions/subagent-async/index.ts";
 import { FLEET_MODEL } from "../extensions/lib/fleet-model.ts";
+import { scrubSubagentEnv } from "./helpers/subagent-env.ts";
 
 // What agents/orchestrator.md pins (the seat's own audited level, decision 022).
 const ORCHESTRATOR_SEAT = "opencode-go/deepseek-v4.1-flash:max";
@@ -177,12 +178,19 @@ function resolvePiEntry(): string {
 }
 
 let savedArgv1: string | undefined;
+// The rows spawn `orchestrator`/`implement` through the tool gate, whose
+// allowlist and nesting-cap reads are env-driven — that sensitivity is the
+// feature under test, so this file runs the gate on a controlled env of its own
+// rather than on whatever its runner inherited (pi-config#9).
+let restoreSubagentEnv: () => void = () => {};
 beforeAll(() => {
+	restoreSubagentEnv = scrubSubagentEnv();
 	savedArgv1 = process.argv[1];
 	process.argv[1] = resolvePiEntry();
 });
 afterAll(() => {
 	if (savedArgv1 !== undefined) process.argv[1] = savedArgv1;
+	restoreSubagentEnv();
 });
 
 function createPiStub() {
