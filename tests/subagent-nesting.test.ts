@@ -26,6 +26,7 @@ import subagentFactory, {
 	subagentDepth,
 	subagentNestingBlock,
 } from "../extensions/subagent-async/index.ts";
+import { scrubSubagentEnv, unsetSubagentEnv } from "./helpers/subagent-env.ts";
 
 const baseConfig = {
 	sessionId: "subagent-x",
@@ -125,20 +126,17 @@ describe("subagent tool boundary (nesting cap wiring)", () => {
 	subagentFactory(pi);
 
 	let fixtureRoot = "";
-	const saved = {
-		depth: process.env.PI_SUBAGENT_DEPTH,
-		allowlist: process.env.PI_SUBAGENT_ALLOWLIST,
-		agentDir: process.env.PI_CODING_AGENT_DIR,
-	};
+	const savedAgentDir = process.env.PI_CODING_AGENT_DIR;
+	let restoreSubagentEnv: () => void = () => {};
 
 	beforeAll(() => {
 		// This block drives the tool with ambient env: a subagent session inherits
 		// PI_SUBAGENT_ALLOWLIST/PI_SUBAGENT_DEPTH, and the allowlist gate fires
 		// before the nesting gate, so an inherited allowlist would refuse the spawn
 		// for the wrong reason (and make the suite red from inside a subagent).
-		// Snapshot is taken above; afterAll restores it.
-		delete process.env.PI_SUBAGENT_DEPTH;
-		delete process.env.PI_SUBAGENT_ALLOWLIST;
+		// Each row then declares the env it exercises; afterEach returns to this
+		// scrubbed baseline, and afterAll restores the harness's own values.
+		restoreSubagentEnv = scrubSubagentEnv();
 		fixtureRoot = mkdtempSync(join(tmpdir(), "pi-nesting-fixture-"));
 		mkdirSync(join(fixtureRoot, "agents"), { recursive: true });
 		for (const name of ["orchestrator", "implement"]) {
@@ -151,18 +149,13 @@ describe("subagent tool boundary (nesting cap wiring)", () => {
 	});
 
 	afterEach(() => {
-		delete process.env.PI_SUBAGENT_DEPTH;
-		delete process.env.PI_SUBAGENT_ALLOWLIST;
+		unsetSubagentEnv();
 	});
 
 	afterAll(() => {
-		const restore = (key: "PI_SUBAGENT_DEPTH" | "PI_SUBAGENT_ALLOWLIST" | "PI_CODING_AGENT_DIR", value: string | undefined) => {
-			if (value === undefined) delete process.env[key];
-			else process.env[key] = value;
-		};
-		restore("PI_SUBAGENT_DEPTH", saved.depth);
-		restore("PI_SUBAGENT_ALLOWLIST", saved.allowlist);
-		restore("PI_CODING_AGENT_DIR", saved.agentDir);
+		restoreSubagentEnv();
+		if (savedAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = savedAgentDir;
 		rmSync(fixtureRoot, { recursive: true, force: true });
 	});
 
