@@ -18,6 +18,8 @@ Read relevant docs before implementing a feature or change. Keep docs up to date
 
 **Log decisions.** Record significant decisions — tradeoffs accepted, alternatives rejected, pivots — for every non-trivial task, in the project's `decisions/<area>/` (format: the project's decision rule or `decisions/README.md`). A decision file is **historical record** — the ruling plus its re-litigation proofing, supersessions noted in place — so anything it settles that shapes the design must **also** be captured in the forward-looking docs. A ruling that exists only in a decision file is a doc bug.
 
+**Fix stale docs found while tracing a ruling.** A doc that states a point a later ruling changed, without a superseded note citing the *most recent* ruling that changes it, gets fixed then. A decision record keeps its original ruling and gains the superseded note; a design doc is rewritten to the current ruling, or deleted if redundant.
+
 ## Testing
 
 **Green before handoff.** The shared mainline is green, so a failing build or test is yours to investigate and fix — run the project's build + test suite before handing work off, and never leave a red state behind.
