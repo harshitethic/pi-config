@@ -37,7 +37,7 @@
  *    reached through a renamed helper (`const run = promisify(execFile)`) is
  *    not seen. Row 1 is the guarantee; row 2 is the early warning.
  *
- * Options rejected (numbers measured on bun 1.3.11, 2026-10-22):
+ * Options rejected (numbers measured on bun 1.3.11, 2026-10-21):
  *   - (A) nested `bun test` over the whole suite: it doubles the suite
  *     (+~150 s measured), and it runs the live rows so a transient model
  *     failure reds an env-hermeticity pin. Row 1 already keeps A's observable;
@@ -65,7 +65,9 @@
  * them up from an ambient value (the gate-spawned pi children get both
  * overwritten, and the two in-process SDK sessions load exactly one explicit
  * extension against a temp agentDir). The scrub set therefore stays the three
- * gate vars — see docs/investigations/structure-trend.md.
+ * gate vars — see docs/investigations/structure-trend.md. Revisit if a test
+ * ever spawns a pi child that uses tools: the pair then reaches an in-process
+ * reader (worktree-guard in the child) and joins the scrub set.
  *
  * Run: bun test tests/subagent-boundary-hermeticity.test.ts
  */

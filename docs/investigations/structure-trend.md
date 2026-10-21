@@ -18,7 +18,7 @@ refactor lands.
 | `extensions/{checkpoint,auto-checkpoint}` read tracking | 1 (2026-10-21) | open — one duplicate copy remains in `auto-checkpoint.ts` (blocked: another session's WIP, migration order pending owner ruling) | fold `auto-checkpoint.ts` onto `extensions/lib/read-tracking.ts` |
 | `extensions/checkpoint.ts` growth | 1 (2026-10-21) | **resolved 2026-10-21 by WO-2026-057** — the named extraction landed (901 → 818 lines; git/token helpers now in `extensions/lib/checkpoint-meta.ts`) | done |
 
-## 2026-10-22 — chunk: boundary-pin derivation (test-side only)
+## 2026-10-21 — chunk: boundary-pin derivation (test-side only)
 
 Closes the two follow-ups parked in the spawn-env idiom entry below. Zero
 production change.
@@ -57,9 +57,12 @@ itself in every wiring row), and no in-suite child or SDK session that loads the
 guard off an ambient value.
 
 Suite: 822 tests / 0 fail / 43 files bare and under injected `PI_SUBAGENT_*`
-(baseline in the same worktree 820/0; +2 rows). Flaky rows seen in both windows
-and at base: `apps/changelog-gen/src/cli.test.ts` (spawns `npx tsx`; handed to
-bug-triage) and the live-model e2e rows.
+(baseline in the same worktree 820/0; +2 rows — committed-tree counts; the main
+checkout reads +3 from another session's uncommitted `tests/auto-checkpoint.test.ts`
+rows). Flaky rows seen in both windows and at base:
+`apps/changelog-gen/src/cli.test.ts` (spawns `npx tsx`) — **fixed 2026-10-21 @
+52d2301 (gh #10)**: `runCli` spawns bun directly, and a fake-broken-npx
+regression pin guards the class; and the live-model e2e rows.
 
 ### Growth
 
@@ -93,8 +96,9 @@ all (the order assumed e2e-checkpoint did) — file-level `scrubSubagentEnv()`
 added to both, module-top for the smoke script (scripts have no bun hooks).
 Suite verified on the merge: 823 tests / 0 fail / 43 files bare AND under
 injected `PI_SUBAGENT_*` (the implementer measured 820/0 in its fresh worktree
-— 3 tests/25 expects short of main, an environment artifact; before == after
-either way). No assertion changed.
+— 3 tests/25 expects short of main: the other session's uncommitted
+`tests/auto-checkpoint.test.ts` adds 3 rows a fresh worktree does not carry;
+before == after either way). No assertion changed.
 
 ### Growth
 
@@ -120,7 +124,7 @@ Test-side only; no strike (production untouched).
   `PI_SUBAGENT_PARENT_CWD`, which `SUBAGENT_ENV_VARS` omits — different class
   (harness worktree plumbing, not gate env); check whether tests need those
   covered.
-  **Both closed 2026-10-22** (entry above): the pin derives its file set, and
+  **Both closed 2026-10-21** (entry above): the pin derives its file set, and
   the guard pair is confirmed a different class — the scrub set stays the three
   gate vars.
 
