@@ -137,3 +137,12 @@ Novel exposure note: S3 is the row that makes the schema load-bearing (pre-chang
 ### Completion Report Format
 
 Standard: status / invariant_exhaustiveness / files_modified / tests / structural_checks / deviations_from_spec / notes_for_orchestrator, plus assumptions_made / unexpected_changes / issues_encountered / test_coverage / adversarial_reviews / review_cap_reached / accepted_notes. Name the S-rows in the tests section.
+
+---
+
+**Landing stamp (2026-10-21, `f2cbcbc`)**: landed as specified with one recorded
+re-derivation — the ordering assumption "git/tokens capture in `execute`" holds
+for `git` and `tokens.before`, but `tokens.after` is patched into the meta from
+`ctx.compact(...).onComplete` because pi exposes it only as
+`CompactionResult.estimatedTokensAfter` there. Do not "fix" the patch back into
+`execute` in a future order: the timing is pi's API shape, not a defect.
