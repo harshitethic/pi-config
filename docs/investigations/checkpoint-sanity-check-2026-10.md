@@ -66,9 +66,15 @@ Not present in installed 0.83.0 despite being documented in its own `docs/sessio
 
 Both are silent (empty set, not an error), which is why they persist unnoticed. The uncommitted `auto-checkpoint.ts` diff already migrated path 1 to `tool_result.input` — so the working tree ships one extension fixed and one broken against the same reality, and their duplicated read-region logic (`checkpoint.ts:70-99` vs `auto-checkpoint.ts:255-300`) has diverged. **Fix = one shared helper, migrate both (share code, don't parallel it).**
 
-### 5.2 Live hazard — checkpoint summary can be overridden by `compaction-model`
+### 5.2 Live hazard — checkpoint summary can be overridden by `compaction-model` (observed 2026-10-21)
 
-`settings.json` loads `checkpoint.ts` before `compaction-model.ts`; pi's extension runner lets the **last non-null `session_before_compact` result win** (`runner.js:576-605`). `compaction-model.ts` returns the fleet model's own `{compaction}`, replacing the agent's verbatim summary and its `firstKeptEntryId`; the `[CHECKPOINT]` text degrades to a summarizer hint. If fleet auth fails, `compaction-model` returns `undefined` and checkpoint's result stands — **behavior flips on auth availability**. (Reasoned from runner/SDK source; not yet observed at runtime.) Use `reason` (change 1 above) and decide explicitly which extension owns the summary.
+`settings.json` loads `checkpoint.ts` before `compaction-model.ts`; pi's extension runner takes the **last non-null `session_before_compact` result** (`runner.js:576-605` — overwrite per non-null, `cancel` short-circuits, throws don't reset). Verified by harness (real runner + real extension modules, fleet `compact()` mocked) and one live run:
+
+- Fleet `compact()` **succeeds** → `compaction-model`'s rewritten summary wins; the agent's `[CHECKPOINT]` text is demoted to a summarizer hint.
+- Fleet `compact()` **fails for any reason** → `compaction-model` returns `undefined`, checkpoint's verbatim summary stands. The trigger is *any* failure (auth, routing, quota, network, 5xx) — not just auth.
+- Boundary is identical either way (`firstKeptEntryId`/`tokensBefore` copied from `preparation` in both paths); only summary text flips. Checkpoint's side effects (archive, injection, continuation) run regardless, since its handler executes first.
+
+**In this environment the override never fires**: fleet `compact()` deterministically 400s with `MissingSessionID` — `opencode-go` requires an `x-opencode-session` header `getApiKeyAndHeaders` doesn't supply (`model-registry.js:30-46`) — and `compaction-model.ts:58-65` swallows the error. The verbatim summary wins today by accident of a silently swallowed provider failure. That swallow is itself a defect: a reproducible config/routing bug plus silent semantic fallback on transient errors.
 
 ### 5.3 Green suite, inert coverage
 
@@ -105,7 +111,7 @@ Priority order:
 
 1. **Un-break injection via one shared read-tracking helper** (characterization tests first): track reads from `tool_result.input`, match `toolCall`/`arguments`, use `branchEntries`. Migrate `checkpoint.ts` and `auto-checkpoint.ts` to it — the divergence is exactly the parallel-implementation failure the repo rules forbid. [addresses 5.1, 5.4]
 2. **Make the injection tests able to fail**: assert injected-message content directly (deterministic spy path exists already for trigger boundaries), or shrink `keepRecentTokens` so needles cannot survive in the kept tail. Delete or revive the `checkpoint_search` block; drop the name from `TOOLS`, `agents/*.md`. [addresses 5.3]
-3. **Resolve the summary-ownership collision** with `compaction-model.ts` (load order vs explicit `reason`-based dispatch) and replace the `[CHECKPOINT]` marker inference with `event.reason`. [addresses 5.2]
+3. **Resolve the summary-ownership collision** (owner ruling pending — verbatim vs fleet vs hybrid): make the winner explicit via `event.reason`-based dispatch instead of load order + the `[CHECKPOINT]` marker, and fix the `MissingSessionID` routing gap (or remove the silent fallback so failures are loud). [addresses 5.2]
 4. **Drift cleanup + decision record** for the `9925257` removals; fix README's tool surface. [addresses 5.5]
 5. **Cheap best-practice upgrades** (one small order): summary schema for `checkpoint` (`goal / files touched / decisions / tried-and-failed / next steps / constraints`), token-delta + summary in the completion notify (observability), and bind the archive meta to the git HEAD at checkpoint time (dual-state alignment). [addresses §3 rows 4, 5, 8]
 6. **Separately: pi upgrade evaluation** (0.83.0 → 1.3.x) — unlocks `reason`-era APIs (`message_end` replacement, possibly `retainedTail`), retires workarounds. Own work order; not a checkpoint fix.
@@ -114,6 +120,8 @@ Suggested sequencing: 1+2 as one work order (refactor-first: the shared helper i
 
 ## 7. Open questions
 
-- Does `compaction-model.ts`'s override actually fire in production (fleet auth normally succeeds)? Needs one observed live checkpoint before deciding between "checkpoint wins" vs "fleet summary wins" semantics.
-- Should checkpoint summaries be verbatim (current design) or fleet-model-summarized with the agent's summary as instruction? The two extensions encode opposite philosophies; that's a design call, not a bug.
-- Is upgrading pi (and designing against `retainedTail`) on the roadmap? It gates how much of §6.5 is worth doing vs. waiting.
+- **Owner ruling needed — summary ownership**: should checkpoint summaries be verbatim (checkpoint.ts's philosophy) or fleet-model-summarized with the agent's summary as instruction (compaction-model's)? Observed fact to weigh: the fleet path currently never fires (5.2), so "keep verbatim" is the live behavior by accident. (Asked 2026-10-21.)
+- **Owner ruling needed — pi upgrade**: 0.83.0 → 1.3.x on the roadmap now or batched later? Gates how much of §6.5 is worth doing vs. waiting. (Asked 2026-10-21.)
+- **Owner ruling needed — uncommitted `auto-checkpoint.ts` WIP** (identified in `structure-trend.md` as another session's work): hands-off + migrate in a follow-up order, or land it? (Asked 2026-10-21.)
+- **Owner ruling needed — April-era features removed by `9925257`** (`doCheckpoint`, `checkpoint-continue`/`-stop`, `isAbnormalStop`, context strip): restore any, or record removal as intentional? (Asked 2026-10-21.)
+- **Open — injection utility**: is file injection useful at all (benefit vs. letting the agent re-read, staleness risk)? Empirical evaluation in flight; gates WO-2026-055 (fix vs. remove).
