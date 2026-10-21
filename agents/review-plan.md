@@ -121,10 +121,22 @@ against; flag sugar opportunities the project policy names.
     this even when no small refactor would shrink the change:
     accumulation across a series of work items is the hazard,
     not this one item.
-  Flag only when the refactor would clearly shrink the change
-  (typically 2× fewer lines, or removes duplicated special
-  cases). Often overlaps with a routing recommendation: do the
-  small refactor first, then the feature becomes trivial.
+  - **Preparatory refactor section** — every work order must have
+    one: a behaviour-preserving refactor behind characterization
+    tests, done by the same implementer before the change (one
+    review, preferably two commits), or `none` with a reason. A missing
+    section is a blocking issue. So is a `none` whose reason
+    fails against the code, and so is a plan that touches an
+    area closed on the repo's refactor-needed register without
+    refactoring it first.
+  There is no size gate. A plan that adds a second
+  implementation of an existing mechanism, copies a block, or
+  adds a branch to duplicated structure is blocking
+  (`REFACTOR FIRST`), even when a later order is supposed to
+  fold it, unless that order lands first. Give the evidence and
+  the preparatory refactor, which becomes the order's refactor
+  commit or, if it belongs to another chunk, its own order
+  (decision subagents/040).
 
 ## Your operating rules
 

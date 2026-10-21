@@ -1,13 +1,22 @@
 # Structure trend
 
 Chunk-boundary structural snapshot for this repo. Convention: `APPEND_SYSTEM.md`
-§Structural audits at chunk boundaries and
-`decisions/subagents/024-structural-growth-checks.md`. One entry per chunk
+§Refactor-needed register, `decisions/subagents/024-structural-growth-checks.md`
+and `040-refactor-first.md`. One entry per chunk
 landing, newest first, under two lenses — **growth** (file/function size deltas,
 candidate extractions) and **unification** (parallel mechanisms for one idea;
 files unrelated work items all had to touch). Delta-based — no absolute
 thresholds. Each audit runs as `scout-code` over the delta since the previous
-entry; the ranked candidates feed the next chunk's sequence before feature work.
+entry. Each growth or parallel-mechanism finding is a strike on its area in the register below;
+two strikes, or one `REFACTOR FIRST` refusal, close the area to feature work until its
+refactor lands.
+
+## Refactor-needed register
+
+| area | strikes (landing or refusal) | state | refactor |
+|---|---|---|---|
+
+None recorded at 2026-10-21.
 
 ## 2026-10-18 — chunk: seat-burn tracker (WO-2026-053, merge `4e7a00b`)
 

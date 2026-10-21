@@ -58,7 +58,21 @@ Read relevant docs before implementing a feature or change. Keep docs up to date
 
 **Refactors land behind tests.** "Same behaviour, different shape" is only checkable against pinned behaviour: before an extraction, unification, or move, name the tests that pin what it preserves, and add characterization tests *first* where coverage is thin. Existing tests pass unchanged — one that must change means behaviour changed; prove that is intended, or stop.
 
-**Structural audits at chunk boundaries.** Codebase growth needs a scheduled check. Each chunk landing appends a snapshot to the repo's `docs/investigations/structure-trend.md` (a chunk is one landing phase of a multi-step effort) under two lenses — **growth** (file/function size deltas, candidate extractions) and **unification** (parallel mechanisms for one idea; files unrelated work items all had to touch). The orchestrator folds the top candidates into the next chunk's sequence *before* feature work. Delta-based, never absolute thresholds. Reviewers report material growth on already-large files/functions (`review-code` item 7); the audit turns observations into scheduled work.
+**Make the change easy, then make the easy change** (decision subagents/040). It is the plan for every work order. Each order has a *Preparatory refactor* section: either a behaviour-preserving refactor, behind characterization tests, that lets the area take the change without a second path, or `none` with a one-line reason. The same implementer does the refactor and then the change, and asks for one standard review, preferably with two commits (the refactor, then the change), so that existing tests passing unchanged at the refactor commit proves it preserves behaviour. Get it right the first time. No landing adds a second implementation of an existing mechanism, a copied block, or one more branch on a structure already known to be duplicated. Debt recorded "for a later order" is not mitigation unless that order lands first.
+
+**Refuse with `REFACTOR FIRST`.** When work would build on an area that strongly needs a refactor (parallel mechanisms, copied blocks, a file or function that each change makes harder to work in), every role is expected to have the standards of a senior developer:
+
+- An orchestrator or implementer refuses to *start*.
+- A reviewer still reviews in full but refuses to *accept* the work (a HIGH finding, so `REJECT_AND_REWORK`).
+
+Give the evidence (sites and sizes) and propose the preparatory refactor. A refusal is a successful outcome, not a failure to deliver. Only the owner can override one.
+
+**Refactor-needed register; two strikes close an area.** Each repo keeps a register in `docs/investigations/structure-trend.md`. Each chunk landing appends a snapshot to that file (a chunk is one landing phase of a multi-step effort) under two lenses:
+
+- **growth**: file and function size deltas, and candidate extractions;
+- **unification**: parallel mechanisms for one idea, and files that unrelated work items all had to touch.
+
+An area flagged by two landings, or by one `REFACTOR FIRST` refusal, goes on the register as **closed**: no feature work lands there until its refactor does. The orchestrator schedules the refactor next. Growth findings are delta-based, never absolute thresholds.
 
 **Keep the remote current.** The remote mainline is an integration point, not a release branch: a green increment that breaks no existing feature is a valid landing even when the feature it belongs to is unfinished — don't hold green work waiting for completeness, and never push red. Pull (fetch + integrate the mainline) before starting a change and again before merging; push merged work promptly, or state explicitly that the push is pending.
 

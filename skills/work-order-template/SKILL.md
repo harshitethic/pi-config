@@ -37,6 +37,27 @@ Your work order quality directly determines whether the implementer succeeds on 
 <The one fact the specified mechanism depends on, and the probe that would falsify it.> If falsified:
 stop, report `PREMISE FALSIFIED` with the evidence; nothing lands.
 
+### Preparatory refactor
+
+Required (decision subagents/040: make the change easy, then make the easy change). Fill in one
+of:
+
+- **Refactor commit:** a behaviour-preserving refactor that lets the area take the change
+  without a second path. That means extending the existing mechanism, not copying it; folding
+  duplicated structure before adding a branch; or extracting before growing a large file or
+  function. Name the characterization tests that pin the behaviour it preserves, and add them
+  first where coverage is thin. The same implementer does the refactor and then the change, and
+  asks for one standard review, preferably with two commits: the refactor (green, existing tests
+  unchanged), then the change. Use a separate order only when the refactor belongs to another
+  chunk or is too large to review alongside the change.
+- **`none`**, with a one-line reason that holds against the code. For example: "the change
+  extends `X` at one site; no copy, no branch on duplicated structure".
+
+Census the area before writing `none`. Grep for an existing mechanism the change would
+duplicate, and check the repo's refactor-needed register (`docs/investigations/structure-trend.md`).
+A closed area needs its refactor scheduled first, as this commit or as an earlier order. It never
+gets a note saying the debt will be folded later.
+
 ### Rejected alternatives
 
 Only alternatives the owner rejected, each citing its ruling (decision, registry row or brief with
@@ -187,6 +208,7 @@ Known risk patterns for this task type. The implementer must explicitly check fo
 - [ ] **No unrequested changes**: No files, routes, or structures modified beyond what the work order specifies
 - [ ] **Build config untouched**: Build configuration (tsconfig, Cargo.toml, CMakeLists) not modified unless explicitly requested
 - [ ] **No unsolicited features**: No features, refactors, or "improvements" added that were not requested in the work order
+- [ ] **No parallel path**: No second implementation of an existing mechanism, copied block, or branch on duplicated structure. If the change needs one, stop and return `REFACTOR FIRST`
 
 > The implementer must check every box above. If any check fails, the implementer must fix the issue before reporting completion or flag it in the completion report.
 

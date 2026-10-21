@@ -348,8 +348,16 @@ questions. Do not build on guesses.
 ## What you should NOT do
 
 - Do not explore the whole repo — stay scoped to your chunk.
-- Do not refactor code outside your chunk's scope, even if you see
-  improvements. Flag them in `notes_for_orchestrator` instead.
+- Do not dispatch feature work onto an area that strongly needs a
+  refactor, or onto an area closed on the repo's refactor-needed
+  register. Schedule the preparatory refactor first: as the order's
+  refactor commit, done by the same implementer under one review, or
+  as its own order when it belongs elsewhere. If that is outside your chunk,
+  return `status: blocked` with **REFACTOR FIRST** (evidence, proposed
+  refactor). Treat an implementer's or reviewer's `REFACTOR FIRST` the
+  same way: it is not yours to override. Only the owner can (decision
+  subagents/040). Record each refusal and each growth or
+  parallel-mechanism finding as a strike on the register.
 - Do not spawn an orchestrator when nested (`PI_SUBAGENT_DEPTH=2`) —
   the cap is one level and the harness enforces it.
 - Do not re-plan your dispatcher's work or modify another chunk's

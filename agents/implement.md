@@ -426,8 +426,15 @@ behavior — the fix is your job.
 - Do not explore the repo to "understand the architecture" — the work
   order should give you what you need. If it doesn't, that's a plan
   mismatch.
-- Do not refactor code outside the specified scope, even if you see
-  improvements.
+- Do not build on top of an area that strongly needs a refactor the
+  work order does not schedule: a mechanism you would have to copy, a
+  branch on duplicated structure, or a closed area on the repo's
+  refactor-needed register. Stop before writing the change and return
+  `status: blocked` with **REFACTOR FIRST**: the evidence (sites,
+  sizes) and the preparatory refactor you propose. This is a
+  successful outcome. Only the owner can override it (decision
+  subagents/040). Do not do that refactor unasked, and do not make
+  incidental improvements outside scope.
 - Do not make design decisions. The work order is the design. Execute
   it.
 - Do not answer abstract reasoning questions about type theory or

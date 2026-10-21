@@ -30,7 +30,7 @@ date: 2026-07-14
 | 021 | Effort rebalance — flash :high, glm-5.3 :max, low banned | done (levels survive on v4.1-flash; GLM basis superseded by 022) |
 | 022 | OpenRouter-only fleet on deepseek/deepseek-v4.1-flash — /fleet-model toggle deleted, oracle off 0813 | done |
 | 023 | Experiment: MiMo V2.6 Flash as the decorrelated reviewer tier (code/plan/tests) | experiment |
-| 024 | Structural growth checks — reviewers report growth; chunk-boundary audit in `structure-trend.md` | done (audit convention relocated to `APPEND_SYSTEM.md`, 2026-10-06) |
+| 024 | Structural growth checks — reviewers report growth; chunk-boundary audit in `structure-trend.md` | done (audit convention relocated to `APPEND_SYSTEM.md`, 2026-10-06; severity and closure superseded by 040) |
 | 025 | Global append prompt for subagents — inject shared `APPEND_SYSTEM.md` explicitly | done |
 | 026 | Subagent events after session disposal — guard async callbacks with a live-session ctx | done |
 | 027 | Recovery scan ownership — adopt a subagent socket only when its spawning process is this process or is gone | done |
@@ -46,3 +46,4 @@ date: 2026-07-14
 | 037 | Reviewers → `opencode-go/glm-5.3-flash:high` (023 experiment superseded); oracle → `opencode-go/deepseek-v4-pro:max` | done |
 | 038 | Main session → `opencode-go/glm-5.3-flash` (meter-driven); multi-session orchestrator split | done |
 | 039 | Gates run the suite once (supersedes the ×2 convention) | done |
+| 040 | Refactor first: a preparatory refactor per work order, `REFACTOR FIRST` refusals, two-strikes area closure (owner only overrides) | done |

@@ -163,11 +163,17 @@ For each item in `Structural Risks`:
    abstraction to introduce, an overgrown function to split,
    a special case to generalize, a data shape that doesn't
    fit the processing it needs to support (change the data,
-   not the code). Flag only when the refactor would clearly
-   shrink the change (typically 2× fewer lines, or removes
-   duplicated special cases). Suggest the smallest refactor
-   that earns the simplification — no architectural
-   grandstanding.
+   not the code). There is no size gate. If the diff builds on
+   structure that a preparatory refactor should have fixed
+   first, that is a finding: a branch added to duplicated
+   structure, a special case that a generalization would
+   absorb, or work around a shape that doesn't fit. Name the
+   smallest refactor that would have made the change easy, and
+   leave out architectural grandstanding. MEDIUM by default.
+   HIGH (`REFACTOR FIRST`) when the work order's Preparatory
+   refactor section is `none` but such a refactor was needed,
+   or when the diff deepens the problem (see the refusal rule
+   below).
 6. **Connascence** — coupling that spec/invariant checks
    miss but accumulates as long-term hazard:
    - **Name/type** — repeated string literals or magic
@@ -189,25 +195,49 @@ For each item in `Structural Risks`:
    MEDIUM at default; HIGH only when global and undocumented.
 7. **Growth** — if the diff materially grows an already-large file
    (repo top decile by size) or adds a branch, flag, or parameter
-   to a long function (>~300 lines), **report it**. The
-   observation is mandatory; the refactor suggestion is not.
-   This is the accumulation channel: no single diff trips item
-   5's "clearly shrink the change" gate, yet a series of
-   reasonable diffs grows the ball of mud. Name the file or
-   function, its current size, and the delta. LOW at default;
-   MEDIUM when the function is already the repo's worst or the
-   diff is a large share of the file's growth. Growth is
-   delta-based — absolute size alone is not a finding in a
-   codebase that is already this large.
+   to a long function (>~300 lines), **report it** with the file
+   or function, its current size, the delta, and the extraction
+   that would take the addition instead. This is the
+   accumulation channel: a series of reasonable diffs grows the
+   ball of mud. MEDIUM by default. HIGH (`REFACTOR FIRST`) when
+   the area is closed on the repo's refactor-needed register,
+   when the function is already the repo's worst, or when the
+   diff is a large share of the file's growth. Each growth
+   finding is a strike against its area: list it under "Notes
+   for orchestrator" so it reaches the register. Growth is
+   delta-based. Absolute size alone is not a finding.
 8. **Parallel mechanisms** — for each new helper, predicate,
    traversal, or dispatcher, `grep` for an existing one doing the
    same job (repo, stdlib, installed deps). A second implementation
-   that should have extended or called the first is MEDIUM; HIGH
-   when the copies already diverge. Cite both sites.
+   that should have extended or called the first is HIGH
+   (`REFACTOR FIRST`): extract or extend instead. Cite both sites.
+   A copy that a later order is supposed to fold is still HIGH
+   unless that order lands first.
 9. **Decision placement** — where the project's docs assign a
    decision to a stage (e.g. front end vs codegen), flag a later
    stage re-deriving or making a decision an earlier stage made or
    should carry. MEDIUM.
+
+### Preparatory refactor commit
+
+When the work order has a preparatory refactor, review it in the
+same pass as the change. If the implementer split it into its own
+commit, check that commit on its own as well: existing tests must
+pass there unchanged, and its diff must preserve behaviour. A
+behaviour change inside the refactor commit is HIGH.
+
+### Refusing to accept: `REFACTOR FIRST`
+
+You still review the whole diff. What you refuse is acceptance.
+When the work builds on an area that strongly needs a refactor
+and does not refactor it first, record a HIGH finding tagged
+`REFACTOR FIRST`. That covers a new parallel mechanism, a copied
+block, a branch added to duplicated structure, and growth in a
+closed area. The finding gives the evidence (sites, sizes) and
+the proposed preparatory refactor, which goes in the rework
+instructions. Neither the implementer's disclosure, a "fix
+later" note, nor an orchestrator's acceptance mitigates it. Only
+the owner can override (decision subagents/040).
 
 ## Output
 
@@ -245,10 +275,10 @@ For each item in `Structural Risks`:
 - Edge cases: <list per case: COVERED/UNCOVERED>
 - Assumptions: <list per assumption: CORRECT/INCORRECT/UNVERIFIABLE>
 - Code style: <PASS/MINOR_ISSUES/MAJOR_DEVIATION>
-- Architectural simplification: <PASS/OPPORTUNITY — refactor + expected shrinkage, or N/A>
+- Architectural simplification: <PASS/CONCERNS/REFACTOR FIRST — the preparatory refactor the change needed, or N/A>
 - Connascence: <PASS/CONCERNS — forms found + locations, or N/A>
-- Growth: <NONE/CONCERNS — files/functions grown, with size and delta, or N/A>
-- Parallel mechanisms: <NONE/CONCERNS — new site + existing site>
+- Growth: <NONE/CONCERNS/REFACTOR FIRST — files/functions grown, with size, delta and register state, or N/A>
+- Parallel mechanisms: <NONE/REFACTOR FIRST — new site + existing site>
 - Decision placement: <PASS/CONCERNS — decision, stage it belongs to, or N/A>
 
 ### Issues
@@ -311,6 +341,8 @@ mitigation. Structural findings (Pass 3 items 5–9) follow the same bar.
   the brief asks you to judge it. Do not rule on it.
 - **A retained path that gives a known wrong value is HIGH** when it is
   in the bug class the work order targets, pre-existing or not.
+- **A `REFACTOR FIRST` finding is HIGH whatever is disclosed.** Recorded
+  debt is not mitigation unless the refactor that pays it has landed.
 
 ## Re-review decision
 
