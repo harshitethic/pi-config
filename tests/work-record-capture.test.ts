@@ -10,7 +10,7 @@
  * Run: bun test tests/work-record-capture.test.ts
  */
 
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
@@ -26,6 +26,7 @@ import subagentFactory, {
 	resolveRunningSession,
 	writeMetaJson,
 } from "../extensions/subagent-async/index.ts";
+import { scrubSubagentEnv } from "./helpers/subagent-env.ts";
 
 // Logs each append to calls.jsonl (ok: false when fail-on names its kind, argv[3]). `summary --json`
 // answers from the accepted reviews logged so far, as the real tool does, and is not logged itself.
@@ -55,6 +56,19 @@ const WO_FILE = "work-orders/WO-2026-001-demo.md";
 const WO_ID = "WO-2026-001";
 const tmpDirs: string[] = [];
 const tmpFiles: string[] = [];
+
+// The spawn rows run `implement` through the tool gate, whose allowlist and
+// nesting-cap reads are env-driven — so this file controls that env instead of
+// inheriting whatever its runner has (pi-config#9).
+let restoreSubagentEnv: () => void = () => {};
+
+beforeAll(() => {
+	restoreSubagentEnv = scrubSubagentEnv();
+});
+
+afterAll(() => {
+	restoreSubagentEnv();
+});
 
 afterEach(() => {
 	for (const d of tmpDirs.splice(0)) fs.rmSync(d, { recursive: true, force: true });
