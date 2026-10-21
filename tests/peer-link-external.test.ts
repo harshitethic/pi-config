@@ -6,7 +6,7 @@
  * Run: bun test tests/peer-link-external.test.ts
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -22,10 +22,25 @@ import {
 	writeHeartbeat,
 } from "../extensions/peer-link/mailbox";
 import { renderMail } from "../extensions/peer-link/external";
+import { childEnv, scrubSubagentEnv } from "./helpers/subagent-env.ts";
 
 const CLI = join(import.meta.dir, "..", "extensions", "peer-link", "external.ts");
 const SID = "0b1c2d3e-aaaa-bbbb-cccc-111122223333";
 const SELF = `claude-${SID}`;
+
+// The rows spawn the CLI, so both halves of the idiom are needed: the scrub
+// keeps the harness's injected PI_SUBAGENT_* out of this process, and childEnv()
+// hands the live env (not bun's startup snapshot) to each spawn
+// (tests/helpers/subagent-env.ts).
+let restoreSubagentEnv: () => void = () => {};
+
+beforeAll(() => {
+	restoreSubagentEnv = scrubSubagentEnv();
+});
+
+afterAll(() => {
+	restoreSubagentEnv();
+});
 
 let dir: string;
 beforeEach(async () => {
@@ -38,7 +53,7 @@ afterEach(async () => {
 function run(args: string[], stdin = ""): { code: number; out: string; err: string } {
 	const p = Bun.spawnSync(["bun", CLI, ...args], {
 		stdin: new TextEncoder().encode(stdin),
-		env: { ...process.env, PI_PEER_MAILBOX: dir },
+		env: childEnv({ PI_PEER_MAILBOX: dir }),
 	});
 	return { code: p.exitCode, out: p.stdout.toString(), err: p.stderr.toString() };
 }

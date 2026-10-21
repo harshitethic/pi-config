@@ -30,6 +30,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import checkpointExtension from "../extensions/checkpoint";
 import { takePendingGo } from "../extensions/go.ts";
+import { childEnv, scrubSubagentEnv } from "./helpers/subagent-env.ts";
 
 const CHECKPOINT_EXTENSION = join(
 	import.meta.dir,
@@ -47,6 +48,19 @@ const NEEDLES = [
 ];
 
 const TOOLS = ["read", "bash", "checkpoint", "checkpoint_fork"];
+
+// The live rows run in a subagent session too, where the harness injects
+// PI_SUBAGENT_*; the file controls that env instead of inheriting it, and every
+// spawn passes childEnv() (tests/helpers/subagent-env.ts).
+let restoreSubagentEnv: () => void = () => {};
+
+beforeAll(() => {
+	restoreSubagentEnv = scrubSubagentEnv();
+});
+
+afterAll(() => {
+	restoreSubagentEnv();
+});
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -527,7 +541,7 @@ async function runCheckpoint(
 }
 
 function sh(cwd: string, args: string[]): string {
-	const res = spawnSync(args[0], args.slice(1), { cwd, encoding: "utf8" });
+	const res = spawnSync(args[0], args.slice(1), { cwd, encoding: "utf8", env: childEnv() });
 	if (res.status !== 0) throw new Error(`${args.join(" ")} failed: ${res.stderr}`);
 	return res.stdout.trim();
 }
