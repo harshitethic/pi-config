@@ -15,8 +15,39 @@ refactor lands.
 
 | area | strikes (landing or refusal) | state | refactor |
 |---|---|---|---|
+| `extensions/{checkpoint,auto-checkpoint}` read tracking | 1 (2026-10-21) | open — one duplicate copy remains in `auto-checkpoint.ts` (blocked: another session's WIP, migration order pending owner ruling) | fold `auto-checkpoint.ts` onto `extensions/lib/read-tracking.ts` |
 
-None recorded at 2026-10-21.
+## 2026-10-21 — chunk: WO-2026-055 checkpoint injection fix (`689de07..59655ec`)
+
+2 commits (`af2733a` extract, `59655ec` change), 7 files: the shared read-tracking
+helper, the `tool_result.input`/`toolCall` sourcing fix, the staleness guard +
+snapshot label (per the utility evaluation in
+`checkpoint-sanity-check-2026-10.md` §5.7), and honest injection coverage.
+Review: review-code + review-tests APPROVED (2 rounds). Excluded as before:
+another session's uncommitted `extensions/auto-checkpoint.ts` + its test.
+
+### Growth
+
+| file | now | base | Δ |
+|---|---:|---:|---:|
+| `extensions/checkpoint.ts` | 664 | 726 | **−62** |
+| `extensions/lib/read-tracking.ts` | 217 | — | +217 (new; logic moved out of `checkpoint.ts`) |
+| `tests/e2e-checkpoint.test.ts` | 952 | 601 | **+351** (deterministic injection rows M1–M14; vacuous describes deleted) |
+| `tests/read-tracking.test.ts` | 299 | — | +299 (new) |
+
+Production code shrank while gaining the staleness guard; all growth is test
+coverage for a feature that previously could not fail. No growth strike.
+
+### Unification
+
+- **Resolved — read-region tracking had two diverging copies** (`checkpoint.ts`
+  on `tool_execution_end.args`, `auto-checkpoint.ts` on `tool_result.input`).
+  `extensions/lib/read-tracking.ts` is now the one ingestion/merge/normalize
+  path; `checkpoint.ts` consumes it. **One copy remains** in
+  `auto-checkpoint.ts` (grandfathered — another session's WIP): strike recorded
+  above; closes when its migration order lands.
+- Checked and not duplicated by this delta: the staleness guard lives only in
+  `selectFreshRegions`; the snapshot label is one constant in `checkpoint.ts`.
 
 ## 2026-10-18 — chunk: seat-burn tracker (WO-2026-053, merge `4e7a00b`)
 
