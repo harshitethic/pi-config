@@ -26,7 +26,7 @@ Against best practice the extension is well-aimed — its injection mechanism *i
 | 3 | Tool-call groups atomic by construction | **Aligned and load-bearing.** Pi never cuts at a `toolResult` (`dist/core/compaction/compaction.js:262-278`) and the `turn_end` deferral keeps the batch pairing intact (decisions/checkpoint/001). |
 | 4 | Bind context state to environment state by shared id (dual-state alignment) | **Gap.** Archives capture messages only — no git ref / worktree state binding. Fork records `newCwd` but no environment snapshot. |
 | 5 | Fixed summary schema incl. "tried and failed, and why" | **Gap.** `summary` is freeform; `nextSteps` optional. Nothing carries failed approaches; the field evidence says the fresh window will cheerfully retry them. |
-| 6 | Drop, don't summarize, re-derivable state | **Aligned in intent** — file injection re-injects file regions as fresh views (Study K's winning pattern), and thinking/raw output is dropped. But the feature is inert (§5.1). |
+| 6 | Drop, don't summarize, re-derivable state | **Aligned, empirically validated (2026-10-21).** Injection reads disk at injection time (`checkpoint.ts:182`) — a fresh minimal view (Study K's winning pattern), not carried state. Measured: 5/5 needle retrieval with injection vs 0/4 summary-only. Caveat: the region *selection* is carried read-time state and goes stale (§5.7). |
 | 7 | Idempotent restore + validity checks (TRAP) | **Partial.** Injection is additive and repeatable; no validity binding of restored content to its originating execution. |
 | 8 | Observable compaction/restore (before/after token counts + summary) | **Partial.** `ui.notify` with archive path exists; no structured event/record of token delta or summary. |
 | 9 | Exact facts live in files, not summary prose | **Aligned.** Archives + injected file regions carry exact content; summary is short. |
@@ -90,7 +90,18 @@ The suite pins the orphan-pairing invariant well (`assertBranchToolCallPairing`,
 
 `getPreservedPaths` and the archive sites scan `sessionManager.getEntries()` (all entries incl. abandoned branches) where `session_before_compact` provides `branchEntries`. On branched sessions, preserved-paths can over-skip and archives can include off-branch entries. Archive-everything is defensible for grep archives; preserved-paths should use `branchEntries`.
 
-### 5.5 Doc/code drift
+### 5.7 Injection utility — measured (2026-10-21)
+
+A/B evaluation (real model trials, e2e-style haystack/needle tasks; harness on branch `pi-subagent-49f05403b984`, `experiments/checkpoint-eval/`). Verdict: **keep with changes**.
+
+- **Benefit**: injection (arm A) 5/5 needles, zero post-compaction reads, answers provably from injected blocks; summary-only (A2) 0/4. But re-read-allowed (A1) and re-read-instructed (D) also 5/5 — injection's advantage over re-read is determinism (D had a checkpoint-call compliance failure; A2 had a no-tools violation), not success rate.
+- **Cost**: injection ≈ one targeted re-read (~1.0–1.1k tokens for 5 regions) and ~3× cheaper than the model's free re-read (~3.1k). Paid unconditionally at every checkpoint; re-read pays only when needed. The 15% budget was never a constraint in trials.
+- **Staleness**: content is fresh (re-read at injection), but **region selection is stale carried state**. S1: file edited after read → injected fresh content (good). S2: 20 lines inserted before the needle → injection served the shifted window and silently omitted the needle (agent answered UNKNOWN). Misleading by omission.
+- **Tension ruled**: injection is a *fresh view*, not carried re-derivable state (bytes re-read from disk) — consistent with rule 6 and Study K once the viewport is validated.
+
+Required changes folded into WO-2026-055: (1) validity guard — record file mtime/size with each region; at injection time, if changed, drop the stale window and name the file in a "changed since read — re-read if needed" note; (2) label the injected block as a checkpoint-time disk snapshot with regions selected from an earlier read.
+
+### 5.8 Doc/code drift
 
 - `README.md:64` documents `checkpoint(summary, nextSteps?, continue?, newCwd?)` + a fork entry recording on the old session — neither exists (two tools; fork stages `/go`, appends nothing to the old session).
 - `doCheckpoint()`, `checkpoint-continue`/`checkpoint-stop`, `isAbnormalStop`, context strip existed in `4611f42` and were removed by stash-recovery commit `9925257` (2026-07-10) with **no decision record**.
@@ -99,24 +110,22 @@ The suite pins the orphan-pairing invariant well (`assertBranchToolCallPairing`,
 - `StrippedAssistant` (`checkpoint.ts:45-48`) is dead type residue.
 
 ### 5.6 Pipeline notes
-
 - WO-2026-054's implementation (`f8bbbe6`) is on an unmerged side branch; `docs/TODO.md:216` correctly says "in flight".
 - Installed pi 0.83.0 is ~5 weeks behind npm latest (1.3.0); the package's own docs describe features (`retainedTail`) its code lacks.
 
 ## 6. Verdict + recommended actions
 
-The architecture is sound and, on the points that matter most (tool-group atomicity, append-only boundaries, archive-before-compact, informed continuation), at or ahead of field consensus. It is not safe to trust today because its second-most-important feature (informed file injection) is dead and untested.
+The architecture is sound and, on the points that matter most (tool-group atomicity, append-only boundaries, archive-before-compact, informed continuation), at or ahead of field consensus. Its second-most-important feature (informed file injection) was dead and untested; it is now empirically validated as worth having (§5.7), with a stale-viewport defect that WO-2026-055 fixes alongside the dead paths.
 
 Priority order:
 
-1. **Un-break injection via one shared read-tracking helper** (characterization tests first): track reads from `tool_result.input`, match `toolCall`/`arguments`, use `branchEntries`. Migrate `checkpoint.ts` and `auto-checkpoint.ts` to it — the divergence is exactly the parallel-implementation failure the repo rules forbid. [addresses 5.1, 5.4]
-2. **Make the injection tests able to fail**: assert injected-message content directly (deterministic spy path exists already for trigger boundaries), or shrink `keepRecentTokens` so needles cannot survive in the kept tail. Delete or revive the `checkpoint_search` block; drop the name from `TOOLS`, `agents/*.md`. [addresses 5.3]
-3. **Resolve the summary-ownership collision** (owner ruling pending — verbatim vs fleet vs hybrid): make the winner explicit via `event.reason`-based dispatch instead of load order + the `[CHECKPOINT]` marker, and fix the `MissingSessionID` routing gap (or remove the silent fallback so failures are loud). [addresses 5.2]
-4. **Drift cleanup + decision record** for the `9925257` removals; fix README's tool surface. [addresses 5.5]
-5. **Cheap best-practice upgrades** (one small order): summary schema for `checkpoint` (`goal / files touched / decisions / tried-and-failed / next steps / constraints`), token-delta + summary in the completion notify (observability), and bind the archive meta to the git HEAD at checkpoint time (dual-state alignment). [addresses §3 rows 4, 5, 8]
-6. **Separately: pi upgrade evaluation** (0.83.0 → 1.3.x) — unlocks `reason`-era APIs (`message_end` replacement, possibly `retainedTail`), retires workarounds. Own work order; not a checkpoint fix.
+1. **WO-2026-055 (dispatched): un-break injection via one shared read-tracking helper** (characterization tests first): track reads from `tool_result.input`, match `toolCall`/`arguments`, use `branchEntries`; add the stale-viewport guard and snapshot label (§5.7); make injection tests able to fail; clean `checkpoint_search` and README drift. Migrate `checkpoint.ts`; `auto-checkpoint.ts`'s migration follows in a separate order (owner ruling pending on its WIP). [addresses 5.1, 5.3, 5.4, 5.7, 5.8]
+2. **Resolve the summary-ownership collision** (owner ruling pending — verbatim vs fleet vs hybrid): make the winner explicit via `reason`-based dispatch instead of load order + the `[CHECKPOINT]` marker, fix the `MissingSessionID` routing gap, and stop swallowing fleet failures into silent fallback (5.2). [addresses 5.2]
+3. **Drift cleanup + decision record** for the `9925257` removals (owner ruling pending on restore-vs-record). [addresses 5.8]
+4. **Cheap best-practice upgrades** (one small order): summary schema for `checkpoint` (`goal / files touched / decisions / tried-and-failed / next steps / constraints`), token-delta + summary in the completion notify (observability), and bind the archive meta to the git HEAD at checkpoint time (dual-state alignment). [addresses §3 rows 4, 5, 8]
+5. **Separately: pi upgrade evaluation** (0.83.0 → 1.3.x) — unlocks `reason`-era APIs (`message_end` replacement, possibly `retainedTail`), retires workarounds. Own work order; not a checkpoint fix. [addresses §3 row 2]
 
-Suggested sequencing: 1+2 as one work order (refactor-first: the shared helper is the preparatory refactor), then 3, then 4+5.
+Suggested sequencing: 1 dispatched; 2 after the owner's summary-ownership ruling; 3–4 batched; 5 on the owner's upgrade answer.
 
 ## 7. Open questions
 
@@ -124,4 +133,4 @@ Suggested sequencing: 1+2 as one work order (refactor-first: the shared helper i
 - **Owner ruling needed — pi upgrade**: 0.83.0 → 1.3.x on the roadmap now or batched later? Gates how much of §6.5 is worth doing vs. waiting. (Asked 2026-10-21.)
 - **Owner ruling needed — uncommitted `auto-checkpoint.ts` WIP** (identified in `structure-trend.md` as another session's work): hands-off + migrate in a follow-up order, or land it? (Asked 2026-10-21.)
 - **Owner ruling needed — April-era features removed by `9925257`** (`doCheckpoint`, `checkpoint-continue`/`-stop`, `isAbnormalStop`, context strip): restore any, or record removal as intentional? (Asked 2026-10-21.)
-- **Open — injection utility**: is file injection useful at all (benefit vs. letting the agent re-read, staleness risk)? Empirical evaluation in flight; gates WO-2026-055 (fix vs. remove).
+- ~~Open — injection utility~~ **Resolved (2026-10-21)**: keep with changes — validated 5/5 vs 0/4; fixes folded into WO-2026-055 (§5.7).
