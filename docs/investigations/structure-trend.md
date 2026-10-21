@@ -16,7 +16,38 @@ refactor lands.
 | area | strikes (landing or refusal) | state | refactor |
 |---|---|---|---|
 | `extensions/{checkpoint,auto-checkpoint}` read tracking | 1 (2026-10-21) | open — one duplicate copy remains in `auto-checkpoint.ts` (blocked: another session's WIP, migration order pending owner ruling) | fold `auto-checkpoint.ts` onto `extensions/lib/read-tracking.ts` |
-| `extensions/checkpoint.ts` growth | 1 (2026-10-21) | open — extraction candidate named (below); a second growth landing closes this area | extract `runGit`/`captureGitBinding`/`tokensBefore`/`renderTokenDelta`/`recordTokensAfter` to `extensions/lib/` |
+| `extensions/checkpoint.ts` growth | 1 (2026-10-21) | **resolved 2026-10-21 by WO-2026-057** — the named extraction landed (901 → 818 lines; git/token helpers now in `extensions/lib/checkpoint-meta.ts`) | done |
+
+## 2026-10-21 — chunk: WO-2026-057 lib extraction (`981d3aa..0886a9f`)
+
+1 commit + 1 merge (bug-triage's `subagent-boundary-hermeticity` pin row merged
+alongside), 2 files: the register's named refactor — `runGit`,
+`captureGitBinding`, `tokensBefore`, `renderTokenDelta`, `recordTokensAfter`,
+`metaPathFor`, `GitBinding`, `CheckpointTokens` moved verbatim from
+`extensions/checkpoint.ts` to `extensions/lib/checkpoint-meta.ts`. Zero test
+edits; suite 814/0. Reviews: review-code APPROVED, review-tests
+APPROVED_WITH_NOTES (2 LOW, accepted).
+
+### Growth
+
+| file | now | base (WO-2026-056) | Δ |
+|---|---:|---:|---:|
+| `extensions/checkpoint.ts` | 818 | 901 | −83 |
+| `extensions/lib/checkpoint-meta.ts` | 108 | — | +108 (new) |
+
+Delta, not strike: the growth candidate this register named has landed and the
+row is resolved. One-way imports hold (the lib imports only `node:*` and a
+type-only `ExtensionContext`).
+
+### Unification
+
+- Exports minimal: `runGit`/`GIT_TIMEOUT_MS` module-private; nothing that
+  `checkpoint.ts` does not consume.
+- Follow-up candidates surfaced by review, parked here (not register rows):
+  a git-hang behavioural row (timeout survives only as a constant — dropping
+  the `execFile` timeout option would still pass all 814) next time
+  `checkpoint-meta.ts` is touched, and a `tsc --noEmit` step (the repo has no
+typecheck step — that is how a dead type import survived to review).
 
 ## 2026-10-21 — chunk: WO-2026-056 summary schema + observability (`4b2861c..f2cbcbc`)
 
