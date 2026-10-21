@@ -32,9 +32,13 @@ The ruling selects one column; implement exactly that column:
 
 Rows common to all columns: the failure row is **never silent** — `compaction-model.ts` currently swallows every fleet error into `undefined`, which under every model is a defect (§5.2); the `[CHECKPOINT]` marker stays (`reason` is `"manual"` for both checkpoint and `/compact` and cannot split them — pi-upgrade §2); the compaction boundary row (below) holds in all columns.
 
-### Premise
+### Premise — VERIFIED 2026-10-21 (scout probe of the installed 0.83.0 runtime; no runtime capture needed)
 
-Pi 0.83.0 populates `reason` (`"manual" | "threshold" | "overflow"`) on compaction events (installed `dist/core/extensions/types.d.ts`), and pi's extension runner takes the **last non-null** `session_before_compact` result (overwrite per non-null; `cancel` short-circuits; a throw does not reset a previous non-null — `runner.js`, sanity-check §5.2). Probe: capture one real compaction event (or the harness's) and confirm `reason` is populated and distinguishes `manual` from `threshold`. If absent or constant, stop — report `PREMISE FALSIFIED`; the marker-only split is the fallback design, surface it, do not improvise.
+- `reason` is populated at runtime on `SessionBeforeCompactEvent` (`dist/core/extensions/types.d.ts:447`); exactly two emit sites, both pass it — manual `agent-session.js:1396` (`reason: "manual"`, `customInstructions` forwarded at `:1394`), auto `agent-session.js:1623` (forwarded). `threshold` (`:1583-1584`) and `overflow` (`:1536`, `:1556`) funnel through `_runAutoCompaction(reason, willRetry)` (`:1591`) — structurally guaranteed, not per-site.
+- `/compact` and `ctx.compact()` both report `"manual"` (`session.compact()` hardcodes it; `CompactOptions` has no reason field — `types.d.ts:200-204`). The `[CHECKPOINT]` marker in `customInstructions` is the only checkpoint-vs-/compact discriminator (`checkpoint.ts:30`, `:442`).
+- Runner resolution: `runner.js:570-605` — last non-null overwrites (`:586-587`), `cancel` short-circuits (`:588-590`), a throw only logs and leaves a prior non-null standing (`:593-601`).
+- **Results replace, do not merge**: with `checkpoint.ts:464-467` and `compaction-model.ts:57` both returning `{compaction}`, the later-loaded extension (compaction-model) wins outright whenever it returns non-null. Checkpoint's summary survives today only because the fleet call fails into `undefined`. The dispatch's `undefined` **yield** on the checkpoint path is therefore the enforcement point itself — not a side effect.
+- Caveats (dispatch-irrelevant but report-relevant): `reason` is NOT persisted in the compaction entry (`session-manager.js:803-817`) — tests must dispatch on the live event; `reason === "overflow"` does not imply `willRetry`.
 
 ### Preparatory refactor
 
@@ -48,7 +52,7 @@ Pi 0.83.0 populates `reason` (`"manual" | "threshold" | "overflow"`) on compacti
 
 **Invariants** (the blast radius):
 - **Compaction boundary untouched**: `firstKeptEntryId` / `tokensBefore` are copied from `preparation` and identical across paths (§5.2) — the dispatch selects summary *text* only.
-- **Load order invariant**: `settings.json` loads `checkpoint.ts` before `compaction-model.ts`; pi's last-non-null rule plus that order is what lets compaction-model yield or win. Do not change the order.
+- **Load order invariant**: `settings.json` loads `checkpoint.ts` before `compaction-model.ts`; pi's last-non-null rule plus that order is what lets compaction-model yield or win (replace-not-merge: `runner.js:586-587`). Do not change the order.
 - **Checkpoint side effects** (archive, file injection, informed continuation) run regardless of the dispatch outcome — as today.
 - The `[CHECKPOINT]` marker survives into the stored summary text in every model.
 
