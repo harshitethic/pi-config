@@ -466,11 +466,18 @@ interface CompactSpyCall {
 	onError?: (error: Error) => void;
 }
 
+interface HarnessCtxOptions {
+	/** Entries returned by `ctx.sessionManager.getEntries()`. */
+	entries?: any[];
+	contextWindow?: number;
+}
+
 /**
  * Drive the real checkpoint extension with a captured handler table and a
  * `ctx.compact` spy. Live-model e2e cannot deterministically produce the
- * "execute() must not compact", "two requests in one turn", or "compaction
- * fails" states, so these exercise the trigger state machine directly.
+ * "execute() must not compact", "two requests in one turn", "compaction
+ * fails", or "this exact read window was tracked" states, so these exercise
+ * the trigger state machine and the injection pipeline directly.
  */
 function makeCheckpointHarness() {
 	const tools = new Map<string, any>();
@@ -494,24 +501,76 @@ function makeCheckpointHarness() {
 	} as unknown as Parameters<typeof checkpointExtension>[0];
 	checkpointExtension(api);
 
-	const makeCtx = (cwd: string) => ({
+	const makeCtx = (cwd: string, opts: HarnessCtxOptions = {}) => ({
 		cwd,
-		model: { contextWindow: 200_000 },
+		model: { contextWindow: opts.contextWindow ?? 200_000 },
 		ui: {
 			notify: (message: string, level: string) => notifications.push({ message, level }),
 		},
 		sessionManager: {
-			getEntries: () => [],
+			getEntries: () => opts.entries ?? [],
 			getSessionId: () => "test-session",
+			getCwd: () => cwd,
 		},
 		compact: (options: CompactSpyCall) => compactCalls.push(options),
 	});
 
-	const emit = async (event: string, ctx: any) => {
-		for (const handler of handlers.get(event) ?? []) await handler({ type: event }, ctx);
+	/** Fire every handler for `event`, returning their results. */
+	const emit = async (event: string, ctx: any, payload: Record<string, unknown> = {}) => {
+		const results: unknown[] = [];
+		for (const handler of handlers.get(event) ?? []) {
+			results.push(await handler({ type: event, ...payload }, ctx));
+		}
+		return results;
 	};
 
 	return { tools, makeCtx, emit, sent, compactCalls, notifications };
+}
+
+// ---------------------------------------------------------------------------
+// Deterministic injection driver
+// ---------------------------------------------------------------------------
+
+/**
+ * Run one full deterministic checkpoint: queue it, fire `turn_end`, fire
+ * `session_before_compact` (where the injection is built), then complete the
+ * compaction. Returns the follow-up message text, which is the injection's real
+ * delivery path.
+ */
+async function checkpointAndInject(
+	h: ReturnType<typeof makeCheckpointHarness>,
+	ctx: any,
+	opts: {
+		relevantPaths: string[];
+		summary?: string;
+		branchEntries?: any[];
+		firstKeptEntryId?: string;
+	},
+): Promise<string> {
+	const checkpoint = h.tools.get("checkpoint");
+	await checkpoint.execute(
+		"call-1",
+		{
+			summary: opts.summary ?? "deterministic summary",
+			nextSteps: "NEXT-STEP",
+			relevantPaths: opts.relevantPaths.map((path) => ({ path })),
+		},
+		undefined,
+		undefined,
+		ctx,
+	);
+	await h.emit("turn_end", ctx);
+	const compact = h.compactCalls[h.compactCalls.length - 1];
+	if (!compact) throw new Error("turn_end did not request a compaction");
+	await h.emit("session_before_compact", ctx, {
+		customInstructions: compact.customInstructions,
+		preparation: { firstKeptEntryId: opts.firstKeptEntryId ?? "entry-0", tokensBefore: 1000 },
+		branchEntries: opts.branchEntries ?? [],
+		reason: "manual",
+		willRetry: false,
+	});
+	compact.onComplete?.({});
+	return h.sent[h.sent.length - 1]?.text ?? "";
 }
 
 describe("checkpoint: compaction trigger boundary (deterministic, ctx.compact spy)", () => {
@@ -594,6 +653,35 @@ describe("checkpoint: compaction trigger boundary (deterministic, ctx.compact sp
 			await h.emit("turn_end", ctx);
 			expect(h.compactCalls).toHaveLength(2);
 			expect(h.compactCalls[1].customInstructions).toContain("recovered");
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	}, 30_000);
+});
+
+// ---------------------------------------------------------------------------
+// Read tracking (deterministic, captured handler table)
+// ---------------------------------------------------------------------------
+
+describe("checkpoint: read-window tracking (deterministic)", () => {
+	it("records a read window from a tool event carrying args (pre-fix sourcing)", async () => {
+		const h = makeCheckpointHarness();
+		const cwd = await mkdtemp(join(tmpdir(), "ckpt-tracking-"));
+		try {
+			await createHaystackFiles(cwd);
+			const ctx = h.makeCtx(cwd);
+			await h.emit("session_start", ctx);
+
+			await h.emit("tool_execution_end", ctx, {
+				toolCallId: "t1",
+				toolName: "read",
+				isError: false,
+				args: { path: "haystack_1.ts", offset: 1, limit: 5 },
+			});
+
+			const text = await checkpointAndInject(h, ctx, { relevantPaths: ["haystack_1.ts"] });
+			expect(text).toContain("[haystack_1.ts]");
+			expect(text).toContain("placeholder_001");
 		} finally {
 			await rm(cwd, { recursive: true, force: true });
 		}

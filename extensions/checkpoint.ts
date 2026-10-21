@@ -1,9 +1,16 @@
 import { mkdir, readdir, readFile, writeFile, stat } from "node:fs/promises";
-import { join, relative, resolve as resolvePath } from "node:path";
+import { join, resolve as resolvePath } from "node:path";
 import type { AgentMessage, AssistantMessage } from "@earendil-works/pi-agent-core";
 import { SessionManager, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { setPendingGo } from "./go.ts";
+import {
+	ReadTracker,
+	collectPreservedReadPaths,
+	formatRanges,
+	mergeRegions,
+	normalizePath,
+} from "./lib/read-tracking.ts";
 
 const CHECKPOINT_DIR = ".pi/checkpoints";
 const MARKER = "[CHECKPOINT]";
@@ -24,12 +31,6 @@ interface RelevantPathEntry {
 	path: string;
 }
 
-interface ReadRegion {
-	offset: number;
-	/** Number.MAX_SAFE_INTEGER means "read to end". */
-	limit: number;
-}
-
 /** State passed from checkpoint tool → compaction hook → onComplete callback. */
 interface PendingCheckpoint {
 	summary: string;
@@ -42,16 +43,12 @@ interface PendingCheckpoint {
 	injection?: { text: string; omitted: string[]; skippedPreserved: string[] };
 }
 
-type StrippedAssistant = Omit<AssistantMessage, "content"> & {
-	content: AssistantMessage["content"];
-};
-
 // ---------------------------------------------------------------------------
 // Session-scoped state
 // ---------------------------------------------------------------------------
 
 /** Files read this session, keyed by normalized relative-to-cwd path. */
-const readRegions = new Map<string, ReadRegion[]>();
+const reads = new ReadTracker();
 
 /** Pending checkpoint data that bridges execute() → session_before_compact → onComplete. */
 let pendingCheckpoint: PendingCheckpoint | null = null;
@@ -62,77 +59,6 @@ let pendingCheckpoint: PendingCheckpoint | null = null;
  * call in the same turn replaces the data but only one compaction fires.
  */
 let compactRequested = false;
-
-// ---------------------------------------------------------------------------
-// Path helpers
-// ---------------------------------------------------------------------------
-
-function normalizePath(filePath: string, cwd: string): string {
-	const absolute = resolvePath(cwd, filePath);
-	const rel = relative(cwd, absolute);
-	return rel.startsWith("..") ? absolute : rel || ".";
-}
-
-// ---------------------------------------------------------------------------
-// Read-region helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Merge overlapping/adjacent read regions to minimise duplicated content.
- * Returns inclusive line numbers (endLine is the last line included).
- */
-function mergeRegions(regions: ReadRegion[]): Array<{ offset: number; endLine: number }> {
-	const sorted = regions
-		.map((r) => ({ offset: r.offset, endLine: r.offset + r.limit - 1 }))
-		.sort((a, b) => a.offset - b.offset);
-
-	const merged: Array<{ offset: number; endLine: number }> = [];
-	for (const r of sorted) {
-		const prev = merged[merged.length - 1];
-		if (prev && r.offset <= prev.endLine + 1) {
-			prev.endLine = Math.max(prev.endLine, r.endLine);
-		} else {
-			merged.push({ ...r });
-		}
-	}
-	return merged;
-}
-
-// ---------------------------------------------------------------------------
-// Preservation boundary detection
-// ---------------------------------------------------------------------------
-
-/**
- * Scan session entries from `firstKeptEntryId` forward and collect the set of
- * file paths that appear in preserved `read` tool calls.  These files are
- * already in the retained context and should not be re-injected.
- *
- * Uses the raw args.path from tool_use blocks and normalises them the same
- * way readRegions keys are built.
- */
-function getPreservedPaths(
-	entries: Array<{ id: string; type: string; message?: AgentMessage | null }>,
-	firstKeptEntryId: string,
-	cwd: string,
-): Set<string> {
-	const paths = new Set<string>();
-	let found = false;
-	for (const entry of entries) {
-		if (entry.id === firstKeptEntryId) found = true;
-		if (!found) continue;
-		if (entry.type === "message" && entry.message?.role === "assistant") {
-			for (const block of entry.message.content) {
-				if (block.type === "tool_use" && block.name === "read") {
-					const input = (block as { input?: { path?: unknown; offset?: unknown; limit?: unknown } }).input;
-					const rawPath = input?.path;
-					if (typeof rawPath !== "string") continue;
-					paths.add(normalizePath(rawPath, cwd));
-				}
-			}
-		}
-	}
-	return paths;
-}
 
 // ---------------------------------------------------------------------------
 // File injection
@@ -180,7 +106,7 @@ async function buildFileInjection(
 
 		try {
 			const raw = await readFile(absolutePath, "utf-8");
-			const regions = readRegions.get(key);
+			const regions = reads.regionsFor(key, cwd);
 
 			// No read regions tracked → nothing to inject, skip entirely.
 			if (!regions || regions.length === 0) continue;
@@ -300,22 +226,18 @@ async function archiveSession(
 export default function (pi: ExtensionAPI) {
 	// -- Read tracking ---------------------------------------------------
 	pi.on("session_start", () => {
-		readRegions.clear();
+		reads.clear();
 		pendingCheckpoint = null;
 		compactRequested = false;
 	});
 
-	pi.on("tool_execution_end", (event, ctx) => {
+	pi.on("tool_execution_end", async (event, ctx) => {
 		if (event.toolName !== "read" || event.isError) return;
 		const path: string | undefined = event.args?.path;
 		if (!path) return;
 		const offset: number = event.args?.offset ?? 1;
 		const limit: number = event.args?.limit ?? Number.MAX_SAFE_INTEGER;
-
-		const key = normalizePath(path, ctx.cwd);
-		const regions = readRegions.get(key) ?? [];
-		regions.push({ offset, limit });
-		readRegions.set(key, regions);
+		await reads.recordRead(path, ctx.cwd, { offset, limit });
 	});
 
 	// -- Compaction trigger ----------------------------------------------
@@ -370,7 +292,7 @@ export default function (pi: ExtensionAPI) {
 
 			// Read and inject files now that we know the preservation boundary.
 			if (pendingCheckpoint) {
-				const preserved = getPreservedPaths(
+				const preserved = collectPreservedReadPaths(
 					ctx.sessionManager.getEntries(),
 					preparation.firstKeptEntryId,
 					ctx.cwd,
@@ -680,22 +602,10 @@ export default function (pi: ExtensionAPI) {
 			const focus = args.trim();
 
 			let fileHint = "";
-			if (readRegions.size > 0) {
+			if (reads.size > 0) {
 				const lines: string[] = [];
-				for (const [path, regions] of readRegions) {
-					const merged = mergeRegions(regions);
-					const ranges = merged
-						.map((r) =>
-							r.endLine >= Number.MAX_SAFE_INTEGER - 1
-								? `L${r.offset}-end`
-								: `L${r.offset}-${r.endLine}`,
-						)
-						.join(", ");
-					const fullFile =
-						merged.length === 1 &&
-						merged[0].offset === 1 &&
-						merged[0].endLine >= Number.MAX_SAFE_INTEGER - 1;
-					lines.push(`- ${path}${fullFile ? " (entire file)" : ` → ${ranges}`}`);
+				for (const { path, merged, wholeFile } of reads.fileSummaries()) {
+					lines.push(`- ${path}${wholeFile ? " (entire file)" : ` → ${formatRanges(merged)}`}`);
 				}
 				fileHint =
 					`\n\nFiles read this session (be conservative with relevantPaths — only include files you're certain you'll need; ` +
