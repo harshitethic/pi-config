@@ -18,6 +18,51 @@ refactor lands.
 | `extensions/{checkpoint,auto-checkpoint}` read tracking | 1 (2026-10-21) | open — one duplicate copy remains in `auto-checkpoint.ts` (blocked: another session's WIP, migration order pending owner ruling) | fold `auto-checkpoint.ts` onto `extensions/lib/read-tracking.ts` |
 | `extensions/checkpoint.ts` growth | 1 (2026-10-21) | **resolved 2026-10-21 by WO-2026-057** — the named extraction landed (901 → 818 lines; git/token helpers now in `extensions/lib/checkpoint-meta.ts`) | done |
 
+## 2026-10-21 — chunk: WO-2026-058 + WO-2026-059 test-infra pair (`a23e6d3..d03af90`)
+
+Two test-side orders landed in one window (suite 823/0 bare and 823/0 under
+harness-style injection at `d03af90` — verdict now invariant to invocation
+context, pi-config#9). 058: boundary rows control the `PI_SUBAGENT_*` env they
+exercise via `tests/helpers/subagent-env.ts`; KNOWN-BUG pin row flipped
+positive; mutation-checked (removing the scrubs reds the pin). 059: the parked
+git-hang row — `runGit`'s `execFile` timeout pinned by a discriminating row,
+mutation-checked both ways (option dropped → row reds on its witness; restored
+→ green). Zero production change in both (059: `extensions/lib/checkpoint-meta.ts`
+byte-identical). Reviews: 058 both APPROVED_WITH_NOTES (1 round), 059
+APPROVED/APPROVED (1 + 2 rounds); LOWs accepted. Excluded as before: another
+session's uncommitted `auto-checkpoint.ts` + `settings.json` +
+`tests/auto-checkpoint.test.ts` + `decisions/settings/**`.
+
+### Growth
+
+| file | now | base | Δ |
+|---|---:|---:|---:|
+| `tests/helpers/subagent-env.ts` | 55 | — | +55 (new) |
+| `tests/subagent-env.test.ts` | 101 | — | +101 (new) |
+| `tests/checkpoint-meta.test.ts` | 161 | — | +161 (new) |
+| 7 adopted test files | — | — | net +93/−73 (scrub lines only; no assertion changed) |
+
+Test-side growth only; no strike (production untouched).
+
+### Unification
+
+- Three hand-rolled `PI_SUBAGENT_*` scrub copies (`owner-asks`, `session-log`,
+  `subagent-nesting`) folded into the one helper, and the new sites adopt it —
+  one scrub mechanism repo-wide, which is what made "no third copy" true.
+- One spawn-env idiom (`childEnv`) with the Bun startup-snapshot quirk pinned
+  in one place. Both orders' implementers probed the quirk independently and
+  agreed: it bites *sync* spawns only; async `execFile` sees live `process.env`.
+- No parallel paths introduced (one shim fixture, one witness helper, no second
+  harness).
+- Reviewer seats (023): verdicts matched the diffs on gate inspection; one
+  reviewer remark was wrong on branch ancestry (the implementer corrected it) —
+  data point for the seat call.
+- Follow-ups parked here (not register rows): `tests/e2e-checkpoint.test.ts:530`
+  spawns without explicit env (same hermeticity class — next file to trip),
+  `tests/peer-link-external.test.ts:41` + `tests/peer-link-smoke.ts:28` could
+  adopt `childEnv()`, bun 1.3.11 `execFileSync`-under-`bun test` stderr leak
+  (test-log noise; upstream quirk), and the still-parked `tsc --noEmit` step.
+
 ## 2026-10-21 — chunk: WO-2026-057 lib extraction (`981d3aa..0886a9f`)
 
 1 commit + 1 merge (bug-triage's `subagent-boundary-hermeticity` pin row merged
@@ -44,10 +89,10 @@ type-only `ExtensionContext`).
 - Exports minimal: `runGit`/`GIT_TIMEOUT_MS` module-private; nothing that
   `checkpoint.ts` does not consume.
 - Follow-up candidates surfaced by review, parked here (not register rows):
-  a git-hang behavioural row (timeout survives only as a constant — dropping
-  the `execFile` timeout option would still pass all 814) next time
-  `checkpoint-meta.ts` is touched, and a `tsc --noEmit` step (the repo has no
-typecheck step — that is how a dead type import survived to review).
+  a git-hang behavioural row — **done 2026-10-21 (WO-2026-059)**: the `execFile`
+  timeout is now pinned by a discriminating row, mutation-checked both ways —
+  and a `tsc --noEmit` step (the repo has no typecheck step — that is how a dead
+  type import survived to review).
 
 ## 2026-10-21 — chunk: WO-2026-056 summary schema + observability (`4b2861c..f2cbcbc`)
 
