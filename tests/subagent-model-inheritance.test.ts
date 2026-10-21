@@ -33,7 +33,7 @@ import subagentFactory, {
 	resolveChildModel,
 } from "../extensions/subagent-async/index.ts";
 import { FLEET_MODEL } from "../extensions/lib/fleet-model.ts";
-import { scrubSubagentEnv } from "./helpers/subagent-env.ts";
+import { childEnv, scrubSubagentEnv } from "./helpers/subagent-env.ts";
 
 // What agents/orchestrator.md pins (the seat's own audited level, decision 022).
 const ORCHESTRATOR_SEAT = "opencode-go/deepseek-v4.1-flash:max";
@@ -301,7 +301,7 @@ async function waitFor<T>(read: () => T | undefined | Promise<T | undefined>, ms
 function argvModelOf(sid: string): string | undefined {
 	let out: string;
 	try {
-		out = execFileSync("ps", ["-eww", "-o", "command="], { encoding: "utf8" });
+		out = execFileSync("ps", ["-eww", "-o", "command="], { env: childEnv(), encoding: "utf8" });
 	} catch {
 		return undefined;
 	}

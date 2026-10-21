@@ -33,6 +33,7 @@ import {
 	rpcSend,
 } from "../extensions/subagent-async/index.ts";
 import subagentFactory from "../extensions/subagent-async/index.ts";
+import { childEnv } from "./helpers/subagent-env.ts";
 
 /**
  * On-disk path for a parent's reviewer-spawn log — mirrors reviewStatusPath
@@ -385,7 +386,7 @@ describe("describeUnknownSession", () => {
 	});
 
 	it("16b: a leftover socket with a dead owner reports both facts, not a liveness claim", async () => {
-		const dead = Bun.spawn(["true"]);
+		const dead = Bun.spawn(["true"], { env: childEnv() });
 		const deadPid = dead.pid;
 		await dead.exited;
 
