@@ -18,6 +18,47 @@ refactor lands.
 | `extensions/{checkpoint,auto-checkpoint}` read tracking | 1 (2026-10-21) | open — one duplicate copy remains in `auto-checkpoint.ts` (blocked: another session's WIP, migration order pending owner ruling) | fold `auto-checkpoint.ts` onto `extensions/lib/read-tracking.ts` |
 | `extensions/checkpoint.ts` growth | 1 (2026-10-21) | **resolved 2026-10-21 by WO-2026-057** — the named extraction landed (901 → 818 lines; git/token helpers now in `extensions/lib/checkpoint-meta.ts`) | done |
 
+## 2026-10-21 — chunk: spawn-env idiom adoption (`d068989`, merged `5b8c429`)
+
+1 commit + 1 merge, 3 test files (+39/−4), `review_policy: skip` with the
+orchestrator reviewing the diff: the two hermeticity follow-ups parked in the
+058+059 entry. `sh()` in `tests/e2e-checkpoint.test.ts` now passes
+`env: childEnv()` (the real trip-wire: a no-env `spawnSync` hands children bun's
+startup snapshot, so an in-process scrub never reaches them), and
+`tests/peer-link-external.test.ts` / `tests/peer-link-smoke.ts` adopt
+`childEnv(overrides)`. Dispatch premise correction: neither file had a scrub at
+all (the order assumed e2e-checkpoint did) — file-level `scrubSubagentEnv()`
+added to both, module-top for the smoke script (scripts have no bun hooks).
+Suite verified on the merge: 823 tests / 0 fail / 43 files bare AND under
+injected `PI_SUBAGENT_*` (the implementer measured 820/0 in its fresh worktree
+— 3 tests/25 expects short of main, an environment artifact; before == after
+either way). No assertion changed.
+
+### Growth
+
+| file | Δ |
+|---|---:|
+| `tests/e2e-checkpoint.test.ts` | +15/−1 |
+| `tests/peer-link-external.test.ts` | +17/−2 |
+| `tests/peer-link-smoke.ts` | +7/−1 |
+
+Test-side only; no strike (production untouched).
+
+### Unification
+
+- One spawn-env idiom (`childEnv`/`scrubSubagentEnv`) now covers every spawn
+  site the register knows; no second scrub/env helper.
+- Follow-ups parked here (not register rows): the boundary pin
+  (`tests/subagent-boundary-hermeticity.test.ts` `BOUNDARY_FILES`) still lists
+  only the original three files, so the adopted sites have no regression row —
+  and extending it with `tests/e2e-checkpoint.test.ts` would couple the pin to
+  that file's live-model rows (flaky for a hermeticity pin); decide
+  behavioral-vs-static pin in a dedicated tiny order. And
+  `extensions/worktree-guard.ts:298-299` reads `PI_SUBAGENT_WORKTREE` /
+  `PI_SUBAGENT_PARENT_CWD`, which `SUBAGENT_ENV_VARS` omits — different class
+  (harness worktree plumbing, not gate env); check whether tests need those
+  covered.
+
 ## 2026-10-21 — chunk: WO-2026-058 + WO-2026-059 test-infra pair (`a23e6d3..d03af90`)
 
 Two test-side orders landed in one window (suite 823/0 bare and 823/0 under
@@ -58,10 +99,12 @@ Test-side growth only; no strike (production untouched).
   reviewer remark was wrong on branch ancestry (the implementer corrected it) —
   data point for the seat call.
 - Follow-ups parked here (not register rows): `tests/e2e-checkpoint.test.ts:530`
-  spawns without explicit env (same hermeticity class — next file to trip),
-  `tests/peer-link-external.test.ts:41` + `tests/peer-link-smoke.ts:28` could
-  adopt `childEnv()`, bun 1.3.11 `execFileSync`-under-`bun test` stderr leak
-  (test-log noise; upstream quirk), and the still-parked `tsc --noEmit` step.
+  spawns without explicit env — **done 2026-10-21** (spawn-env idiom adoption
+  chunk, below), `tests/peer-link-external.test.ts:41` +
+  `tests/peer-link-smoke.ts:28` adopt `childEnv()` — **done 2026-10-21** (same
+  chunk), bun 1.3.11 `execFileSync`-under-`bun test` stderr leak (test-log
+  noise; upstream quirk — parked: not ours to scrub), and the still-parked
+  `tsc --noEmit` step.
 
 ## 2026-10-21 — chunk: WO-2026-057 lib extraction (`981d3aa..0886a9f`)
 
