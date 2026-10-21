@@ -18,6 +18,68 @@ refactor lands.
 | `extensions/{checkpoint,auto-checkpoint}` read tracking | 1 (2026-10-21) | open — one duplicate copy remains in `auto-checkpoint.ts` (blocked: another session's WIP, migration order pending owner ruling) | fold `auto-checkpoint.ts` onto `extensions/lib/read-tracking.ts` |
 | `extensions/checkpoint.ts` growth | 1 (2026-10-21) | **resolved 2026-10-21 by WO-2026-057** — the named extraction landed (901 → 818 lines; git/token helpers now in `extensions/lib/checkpoint-meta.ts`) | done |
 
+## 2026-10-22 — chunk: boundary-pin derivation (test-side only)
+
+Closes the two follow-ups parked in the spawn-env idiom entry below. Zero
+production change.
+
+**Pin.** `tests/subagent-boundary-hermeticity.test.ts` no longer names files;
+its header is the decision record.
+
+- Behavioral row: derived set — `*.test.*` files that spawn a child or import a
+  module reading `process.env.PI_SUBAGENT_*` / `PI_IS_SUBAGENT`, minus itself
+  and minus live-model files (`createAgentSession`); re-run as a child
+  `bun test` under a replicated harness injection. 24 files, 24–37 s (was 3
+  enumerated files, 6 s).
+- Static row: every spawn call site under `tests/` passes an explicit `env`
+  (inventory 11 files / 16 sites), plus a blindness guard so a mask that eats
+  code cannot pass vacuously.
+- Mutation-checked both ways: dropping a file's `scrubSubagentEnv()` reds the
+  behavioral row (child report in the message); dropping `env: childEnv()` from
+  `tests/e2e-checkpoint.test.ts:544` reds the static row at that line.
+- Rejected: whole-suite nested run (doubles the suite, +~150 s, and couples to
+  live rows); extending the enumerated `BOUNDARY_FILES` (one edit per new file,
+  and e2e-checkpoint is 82 s of live rows); static-only (blind to an in-process
+  observer with no spawn site — `work-order-policy-wiring.test.ts` is one);
+  spawn-wrapper funnel (restructures the 10 just-landed `childEnv()` sites).
+- The static row caught four straggler sites, now passing `env: childEnv()`:
+  `work-record-capture.test.ts:81,101`, `subagent-model-inheritance.test.ts:304`,
+  `subagent-id-resolution.test.ts:388`. No assertion changed.
+
+**Follow-up closed: `PI_SUBAGENT_WORKTREE` / `PI_SUBAGENT_PARENT_CWD` are a
+different class, so `SUBAGENT_ENV_VARS` stays the three gate vars.** One reader
+(`extensions/worktree-guard.ts:298-299`, at extension load inside a pi process),
+one writer that always overwrites both at spawn
+(`extensions/subagent-async/index.ts:1737-1745`, empty when unisolated), no test
+reading them from `process.env` (`tests/subagent-id-resolution.test.ts:669`
+asserts the builder's return; `extensions/worktree-guard.test.mjs` sets both
+itself in every wiring row), and no in-suite child or SDK session that loads the
+guard off an ambient value.
+
+Suite: 822 tests / 0 fail / 43 files bare and under injected `PI_SUBAGENT_*`
+(baseline in the same worktree 820/0; +2 rows). Flaky rows seen in both windows
+and at base: `apps/changelog-gen/src/cli.test.ts` (spawns `npx tsx`; handed to
+bug-triage) and the live-model e2e rows.
+
+### Growth
+
+| file | now | base | Δ |
+|---|---:|---:|---:|
+| `tests/subagent-boundary-hermeticity.test.ts` | 410 | 71 | +339 |
+| `tests/work-record-capture.test.ts` | — | — | +2/−1 |
+| `tests/subagent-model-inheritance.test.ts` | — | — | +2/−2 |
+| `tests/subagent-id-resolution.test.ts` | — | — | +2/−1 |
+
+Test-side growth only; no strike (production untouched).
+
+### Unification
+
+- One derivation (`walk` + `callSites`) feeds both rows, so "spawn-capable" is
+defined once; no second env helper, no per-file list.
+- Watch: the static row is a hand-rolled scanner living in a test file. A third
+consumer (e.g. rejected option D's import restriction) extracts it into
+`tests/helpers/` — do not copy it.
+
 ## 2026-10-21 — chunk: spawn-env idiom adoption (`d068989`, merged `5b8c429`)
 
 1 commit + 1 merge, 3 test files (+39/−4), `review_policy: skip` with the
@@ -58,6 +120,9 @@ Test-side only; no strike (production untouched).
   `PI_SUBAGENT_PARENT_CWD`, which `SUBAGENT_ENV_VARS` omits — different class
   (harness worktree plumbing, not gate env); check whether tests need those
   covered.
+  **Both closed 2026-10-22** (entry above): the pin derives its file set, and
+  the guard pair is confirmed a different class — the scrub set stays the three
+  gate vars.
 
 ## 2026-10-21 — chunk: WO-2026-058 + WO-2026-059 test-infra pair (`a23e6d3..d03af90`)
 

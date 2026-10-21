@@ -26,7 +26,7 @@ import subagentFactory, {
 	resolveRunningSession,
 	writeMetaJson,
 } from "../extensions/subagent-async/index.ts";
-import { scrubSubagentEnv } from "./helpers/subagent-env.ts";
+import { childEnv, scrubSubagentEnv } from "./helpers/subagent-env.ts";
 
 // Logs each append to calls.jsonl (ok: false when fail-on names its kind, argv[3]). `summary --json`
 // answers from the accepted reviews logged so far, as the real tool does, and is not logged itself.
@@ -78,7 +78,7 @@ afterEach(() => {
 function makeRepo({ script = true } = {}): string {
 	const root = fs.mkdtempSync(path.join(os.tmpdir(), "wo-record-capture-"));
 	tmpDirs.push(root);
-	execFileSync("git", ["init", "-q"], { cwd: root });
+	execFileSync("git", ["init", "-q"], { cwd: root, env: childEnv() });
 	fs.mkdirSync(path.join(root, "work-orders"));
 	fs.writeFileSync(path.join(root, WO_FILE), "# WO-2026-001 — demo\n\nbody\n");
 	if (script) {
@@ -98,7 +98,7 @@ function calls(root: string): { argv: string[]; body: string }[] {
 }
 
 function blobOf(root: string, rel: string): string {
-	return execFileSync("git", ["hash-object", "--", rel], { cwd: root, encoding: "utf-8" }).trim();
+	return execFileSync("git", ["hash-object", "--", rel], { cwd: root, env: childEnv(), encoding: "utf-8" }).trim();
 }
 
 const ISO = "2026-10-17T10:00:00.000Z";
