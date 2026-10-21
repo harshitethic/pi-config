@@ -1,7 +1,13 @@
+import { execFile } from "node:child_process";
 import { mkdir, readdir, readFile, writeFile, stat } from "node:fs/promises";
 import { join, resolve as resolvePath } from "node:path";
 import type { AgentMessage, AssistantMessage } from "@earendil-works/pi-agent-core";
-import { SessionManager, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
+	SessionManager,
+	type CompactionResult,
+	type ExtensionAPI,
+	type ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { setPendingGo } from "./go.ts";
 import {
@@ -15,14 +21,88 @@ import {
 
 const CHECKPOINT_DIR = ".pi/checkpoints";
 const MARKER = "[CHECKPOINT]";
-const SUMMARY_FORMAT_HINT =
-	"Structure the summary with three parts: " +
-	"(1) brief bullet list of what was done/accomplished so far, " +
-	"(2) an in-depth explanation of what's being worked on right now and why, " +
-	"(3) medium-length overview of the overall plan (what comes after this).";
 
 // Fraction of context window to use for file injection (15%).
 const INJECTION_BUDGET_FRACTION = 0.15;
+
+// ---------------------------------------------------------------------------
+// Summary schema + rendering
+// ---------------------------------------------------------------------------
+
+/**
+ * The fixed summary schema both checkpoint tools accept (sanity-check §3 row 5,
+ * §6 item 4). Kept verbatim in the archive meta as `summaryFields`.
+ */
+interface SummaryFields {
+	goal: string;
+	filesTouched: string[];
+	decisions: string[];
+	triedAndFailed: string[];
+	constraints: string;
+}
+
+const SUMMARY_FORMAT_HINT =
+	"`summary` is an object and every field is required: " +
+	"`goal` (one paragraph: what this checkpoint is accomplishing), " +
+	"`filesTouched` (repo-relative paths), " +
+	"`decisions` (choices made, with why), " +
+	"`triedAndFailed` (each entry names an approach tried, what happened, and why it failed — " +
+	"the fresh window retries what it is not told about), " +
+	"`constraints` (limits the next window must respect). " +
+	'Empty means the literal "none"/["none"], never an omitted field.';
+
+/** Every field required: presence is the point, so the typebox schema enforces it. */
+const SUMMARY_SCHEMA = Type.Object(
+	{
+		goal: Type.String({
+			description: "One paragraph: what this checkpoint is accomplishing.",
+		}),
+		filesTouched: Type.Array(Type.String(), {
+			description: "Repo-relative paths touched.",
+		}),
+		decisions: Type.Array(Type.String(), {
+			description: 'Choices made and why. ["none"] when none.',
+		}),
+		triedAndFailed: Type.Array(Type.String(), {
+			description:
+				"Each entry: an approach tried, what happened, and why it failed. " +
+				'The next window retries what it is not told about. ["none"] when none.',
+		}),
+		constraints: Type.String({
+			description: 'Limits the next window must respect. "none" when none.',
+		}),
+	},
+	{ description: SUMMARY_FORMAT_HINT },
+);
+
+const NONE = "none";
+
+/** `"none"`/`["none"]`/`[]` all mean "nothing to report". */
+function isNone(items: string[]): boolean {
+	return items.length === 0 || (items.length === 1 && items[0].trim().toLowerCase() === NONE);
+}
+
+/** `label: none`, or the label followed by one bullet per entry. */
+function bulletSection(label: string, items: string[]): string {
+	if (isNone(items)) return `${label}: ${NONE}`;
+	return `${label}:\n${items.map((item) => `  - ${item}`).join("\n")}`;
+}
+
+/**
+ * The canonical summary text. Its three consumers — the compaction
+ * `customInstructions`, `meta.summary`, and `checkpoint_fork`'s seeded message —
+ * all call this; none formats its own copy.
+ */
+function renderSummary(fields: SummaryFields, nextSteps: string): string {
+	return [
+		`Goal: ${fields.goal}`,
+		`Files touched: ${isNone(fields.filesTouched) ? NONE : fields.filesTouched.join(", ")}`,
+		bulletSection("Decisions", fields.decisions),
+		bulletSection("Tried and failed (and why)", fields.triedAndFailed),
+		`Constraints: ${fields.constraints || NONE}`,
+		`Next: ${nextSteps}`,
+	].join("\n");
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -32,11 +112,40 @@ interface RelevantPathEntry {
 	path: string;
 }
 
+/** The working tree a checkpoint was taken from (dual-state alignment, sanity-check §3 row 4). */
+interface GitBinding {
+	head: string;
+	branch: string;
+	dirty: boolean;
+}
+
+/**
+ * Token counts around the compaction: pi's context estimate before it, its
+ * post-compaction estimate after. Either can be null — pi returns null when it
+ * cannot estimate (documented: right after a compaction, before the next LLM
+ * response), and the post count only exists once compaction completes.
+ */
+interface CheckpointTokens {
+	before: number | null;
+	after: number | null;
+}
+
+/** Everything an archive records besides the transcript itself. */
+interface ArchiveMetaExtras {
+	summaryFields: SummaryFields | null;
+	tokens: CheckpointTokens;
+	git: GitBinding | null;
+	/** Set by `checkpoint_fork`: the cwd the new session lands in. */
+	newCwd?: string;
+}
+
 /** State passed from checkpoint tool → compaction hook → onComplete callback. */
 interface PendingCheckpoint {
+	/** `renderSummary` output — the text the fresh window receives verbatim. */
 	summary: string;
 	next: string;
 	doContinue: boolean;
+	tokens: CheckpointTokens;
 	archivePath?: string;
 	relevantPaths: RelevantPathEntry[];
 	cwd: string;
@@ -195,6 +304,78 @@ async function buildFileInjection(
 }
 
 // ---------------------------------------------------------------------------
+// Environment binding + observability
+// ---------------------------------------------------------------------------
+
+/** A hung git must never hold a checkpoint: every call is bounded. */
+const GIT_TIMEOUT_MS = 2000;
+
+function runGit(cwd: string, args: string[]): Promise<string> {
+	return new Promise((resolveGit, rejectGit) => {
+		execFile("git", args, { cwd, timeout: GIT_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
+			if (err) rejectGit(err);
+			else resolveGit(stdout.trim());
+		});
+	});
+}
+
+/**
+ * Bind the archive to the working tree it was taken from. Capture this *before*
+ * writing the archive, or the archive's own untracked files read as `dirty`.
+ * Any failure — not a repo, no git binary, timeout — yields null: git never
+ * fails or delays a checkpoint (same tolerance as the archive-failure path).
+ */
+async function captureGitBinding(cwd: string): Promise<GitBinding | null> {
+	try {
+		const [head, branch, status] = await Promise.all([
+			runGit(cwd, ["rev-parse", "HEAD"]),
+			runGit(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]),
+			runGit(cwd, ["status", "--porcelain"]),
+		]);
+		return { head, branch, dirty: status.length > 0 };
+	} catch {
+		return null;
+	}
+}
+
+/** pi's own estimate of the live context, or null when it has none. */
+function tokensBefore(ctx: ExtensionContext): number | null {
+	return ctx.getContextUsage()?.tokens ?? null;
+}
+
+/** ` Tokens: 120,000 → 3,400 (-116,600)`, or before/after alone when one is all pi has. */
+function renderTokenDelta(tokens: CheckpointTokens): string {
+	const { before, after } = tokens;
+	if (before === null && after === null) return "";
+	if (before === null) return ` Tokens: ${after!.toLocaleString()}`;
+	if (after === null) return ` Tokens: ${before.toLocaleString()}`;
+	const delta = after - before;
+	return (
+		` Tokens: ${before.toLocaleString()} → ${after.toLocaleString()} ` +
+		`(${delta > 0 ? "+" : ""}${delta.toLocaleString()})`
+	);
+}
+
+/** An archive's meta record sits beside it, same basename. */
+function metaPathFor(archivePath: string): string {
+	return archivePath.replace(/\.jsonl$/, ".meta.json");
+}
+
+/**
+ * Merge pi's post-compaction token estimate into an already-written meta. The
+ * archive and its meta are written before `ctx.compact()` — they have to
+ * survive a failed compaction — and `estimatedTokensAfter` only exists once
+ * compaction completes, so the two numbers land in the one meta object in two
+ * steps. Observability only: a failure here never fails a completed checkpoint.
+ */
+async function recordTokensAfter(archivePath: string | undefined, tokens: CheckpointTokens): Promise<void> {
+	if (!archivePath) return;
+	const metaPath = metaPathFor(archivePath);
+	const meta = JSON.parse(await readFile(metaPath, "utf8")) as Record<string, unknown>;
+	await writeFile(metaPath, JSON.stringify({ ...meta, tokens }, null, 2), "utf8");
+}
+
+// ---------------------------------------------------------------------------
 // Archive helpers
 // ---------------------------------------------------------------------------
 
@@ -204,12 +385,13 @@ function stripThinking(msg: AssistantMessage): AssistantMessage {
 	return filtered.length === msg.content.length ? msg : { ...msg, content: filtered };
 }
 
-/** Write session entries to a JSONL archive. */
+/** Write session entries to a JSONL archive, plus the single meta record beside it. */
 async function archiveSession(
 	cwd: string,
 	entries: unknown[],
 	summary: string,
-	sessionId?: string,
+	sessionId: string | undefined,
+	extras: ArchiveMetaExtras,
 ): Promise<string> {
 	const archiveDir = join(cwd, CHECKPOINT_DIR);
 	await mkdir(archiveDir, { recursive: true });
@@ -227,7 +409,7 @@ async function archiveSession(
 	}
 	await writeFile(archivePath, lines.join("\n") + "\n", "utf8");
 
-	const metaPath = archivePath.replace(/\.jsonl$/, ".meta.json");
+	const metaPath = metaPathFor(archivePath);
 	await writeFile(
 		metaPath,
 		JSON.stringify(
@@ -237,6 +419,10 @@ async function archiveSession(
 				archivePath,
 				summary,
 				entryCount: entries.length,
+				summaryFields: extras.summaryFields,
+				tokens: extras.tokens,
+				git: extras.git,
+				...(extras.newCwd ? { newCwd: extras.newCwd } : {}),
 			},
 			null,
 			2,
@@ -282,21 +468,46 @@ export default function (pi: ExtensionAPI) {
 		const pending = pendingCheckpoint;
 		ctx.compact({
 			customInstructions: `${MARKER}\n${pending?.summary ?? ""}`,
-			onComplete: () => {
+			onComplete: async (result: CompactionResult) => {
 				const inj = pending?.injection;
+				const tokens: CheckpointTokens = {
+					before: result?.tokensBefore ?? pending?.tokens.before ?? null,
+					after: result?.estimatedTokensAfter ?? null,
+				};
 				pendingCheckpoint = null;
 
+				// Notify and continuation run before the meta patch below: pi does
+				// not await this callback, and a checkpoint's user-visible outcome
+				// must not wait on an archive write. The outer catch keeps a throw
+				// visible as "Checkpoint failed" — pi's compaction wrapper only sees
+				// synchronous throws from this callback.
 				try {
-					const archiveLine = pending?.archivePath ? `\nArchive: ${pending.archivePath}` : "";
-					ctx.ui.notify(`Checkpoint complete — context cleared.${archiveLine}`, "info");
-				} catch { /* ctx stale after reload */ }
-				if (pending?.doContinue) {
-					const parts = [pending.next];
-					if (inj?.text) parts.unshift(inj.text);
-					if (pending.archivePath) parts.push(`Archive: ${pending.archivePath}`);
-					const followUp = parts.join("\n\n");
-					pi.sendUserMessage(followUp, { deliverAs: "followUp" });
+					try {
+						const archiveLine = pending?.archivePath ? `\nArchive: ${pending.archivePath}` : "";
+						ctx.ui.notify(
+							`Checkpoint complete — context cleared.${renderTokenDelta(tokens)}${archiveLine}`,
+							"info",
+						);
+					} catch { /* ctx stale after reload */ }
+					if (pending?.doContinue) {
+						const parts = [pending.next];
+						if (inj?.text) parts.unshift(inj.text);
+						if (pending.archivePath) parts.push(`Archive: ${pending.archivePath}`);
+						const followUp = parts.join("\n\n");
+						pi.sendUserMessage(followUp, { deliverAs: "followUp" });
+					}
+				} catch (err) {
+					try {
+						ctx.ui.notify(
+							`Checkpoint failed: ${err instanceof Error ? err.message : String(err)}`,
+							"error",
+						);
+					} catch { /* ctx stale after reload */ }
 				}
+
+				try {
+					await recordTokensAfter(pending?.archivePath, tokens);
+				} catch { /* meta gone — the notify already carries the delta */ }
 			},
 			onError: (err) => {
 				pendingCheckpoint = null;
@@ -350,6 +561,12 @@ export default function (pi: ExtensionAPI) {
 				ctx.sessionManager.getEntries(),
 				autoSummary,
 				ctx.sessionManager.getSessionId(),
+				{
+					// No authored summary here — the auto path has no schema fields.
+					summaryFields: null,
+					tokens: { before: preparation.tokensBefore, after: null },
+					git: await captureGitBinding(ctx.cwd),
+				},
 			);
 			ctx.ui.notify(`📦 Archived session for grepping: ${archivePath}`, "info");
 		} catch (err) {
@@ -369,7 +586,7 @@ export default function (pi: ExtensionAPI) {
 			"Use at logical task boundaries when work for this turn is done but more remains. " +
 			"Preserved reads are skipped automatically — only files the model hasn't seen in the preserved tail are injected.",
 		parameters: Type.Object({
-			summary: Type.String({ description: SUMMARY_FORMAT_HINT }),
+			summary: SUMMARY_SCHEMA,
 			nextSteps: Type.Optional(
 				Type.String({
 					description:
@@ -403,6 +620,13 @@ export default function (pi: ExtensionAPI) {
 			const doContinue = params.continue !== false;
 			const relevantPaths: RelevantPathEntry[] = params.relevantPaths ?? [];
 			const contextWindow = ctx.model?.contextWindow ?? 200_000;
+			const summaryFields: SummaryFields = params.summary;
+			const summary = renderSummary(summaryFields, next);
+
+			// Captured before anything is written, so the archive's own untracked
+			// files cannot show up in `git.dirty`.
+			const git = await captureGitBinding(ctx.cwd);
+			const tokens: CheckpointTokens = { before: tokensBefore(ctx), after: null };
 
 			// Archive *before* compaction so all entries are captured in full.
 			let archivePath: string | undefined;
@@ -410,8 +634,9 @@ export default function (pi: ExtensionAPI) {
 				archivePath = await archiveSession(
 					ctx.cwd,
 					ctx.sessionManager.getEntries(),
-					params.summary,
+					summary,
 					ctx.sessionManager.getSessionId(),
+					{ summaryFields, tokens, git },
 				);
 			} catch (err) {
 				ctx.ui.notify(
@@ -425,9 +650,10 @@ export default function (pi: ExtensionAPI) {
 			// the request for the turn_end trigger. Do NOT compact here: the
 			// tool result has not been persisted yet.
 			pendingCheckpoint = {
-				summary: params.summary,
+				summary,
 				next,
 				doContinue,
+				tokens,
 				archivePath,
 				relevantPaths,
 				cwd: ctx.cwd,
@@ -464,9 +690,7 @@ export default function (pi: ExtensionAPI) {
 			newCwd: Type.String({
 				description: "Target working directory for the forked session. Must already exist.",
 			}),
-			summary: Type.String({
-				description: `${SUMMARY_FORMAT_HINT} Authored inline from current context.`,
-			}),
+			summary: SUMMARY_SCHEMA,
 			nextSteps: Type.Optional(
 				Type.String({
 					description:
@@ -519,6 +743,13 @@ export default function (pi: ExtensionAPI) {
 			const oldSessionId = ctx.sessionManager.getSessionId();
 			const oldCwd = ctx.sessionManager.getCwd();
 			const contextWindow = ctx.model?.contextWindow ?? 200_000;
+			const summaryFields: SummaryFields = params.summary;
+			const summary = renderSummary(summaryFields, next);
+
+			// The source tree's ref, captured when the fork is authored (the archive
+			// itself is written at /go, after this): the summary describes this state.
+			const git = await captureGitBinding(oldCwd);
+			const tokens: CheckpointTokens = { before: tokensBefore(ctx), after: null };
 
 			// Fork creates a new session — no preservation to dedup against.
 			const injection = await buildFileInjection(
@@ -537,8 +768,9 @@ export default function (pi: ExtensionAPI) {
 						const forkArchivePath = await archiveSession(
 							cmdCtx.cwd,
 							cmdCtx.sessionManager.getEntries(),
-							params.summary,
+							summary,
 							cmdCtx.sessionManager.getSessionId(),
+							{ summaryFields, tokens, git, newCwd: params.newCwd },
 						);
 						cmdCtx.ui.notify(`📦 Fork source archived: ${forkArchivePath}`, "info");
 					} catch (err) {
@@ -557,7 +789,7 @@ export default function (pi: ExtensionAPI) {
 					});
 					newSession.appendMessage({
 						role: "assistant",
-						content: [{ type: "text", text: params.summary }],
+						content: [{ type: "text", text: summary }],
 						api: "anthropic",
 						provider: "anthropic",
 						model: "unknown",
@@ -612,7 +844,12 @@ export default function (pi: ExtensionAPI) {
 				for (const f of files.sort().reverse()) {
 					const meta = JSON.parse(await readFile(join(archiveDir, f), "utf8"));
 					const shortPath = meta.archivePath ? meta.archivePath.replace(archiveDir, "") : f.replace(/\.meta\.json$/, ".jsonl");
-					lines.push(`  ${meta.timestamp} — ${meta.summary.split("\n")[0]}`);
+					// First line of the rendered summary is its `Goal:` line.
+					const headline = String(meta.summary ?? "(no summary)").split("\n")[0];
+					const git = meta.git
+						? ` [${meta.git.branch}@${String(meta.git.head).slice(0, 7)}${meta.git.dirty ? "+" : ""}]`
+						: "";
+					lines.push(`  ${meta.timestamp} — ${headline}${git}`);
 					lines.push(`        archive: …${shortPath}`);
 				}
 				ctx.ui.notify(lines.join("\n"), "info");

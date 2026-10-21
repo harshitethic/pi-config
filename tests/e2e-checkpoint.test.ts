@@ -14,9 +14,11 @@
  */
 
 import { describe, expect, it, beforeAll, afterAll } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { mkdtemp, writeFile, readFile, rm, readdir } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { Value } from "typebox/value";
 import {
 	createAgentSession,
 	DefaultResourceLoader,
@@ -27,6 +29,7 @@ import {
 	type AgentSession,
 } from "@earendil-works/pi-coding-agent";
 import checkpointExtension from "../extensions/checkpoint";
+import { takePendingGo } from "../extensions/go.ts";
 
 const CHECKPOINT_EXTENSION = join(
 	import.meta.dir,
@@ -296,8 +299,15 @@ describe("checkpoint: basic flow", () => {
 
 	it("triggers checkpoint and compaction succeeds with file injection", async () => {
 		const { session, sessionManager, tmpCwd } = env;
+		// `continue: true` is stated explicitly: the default already makes it true,
+		// but a model that volunteers `continue: false` silently suppresses the
+		// follow-up this row (and the next) depends on — the flake that used to
+		// surface as a 0.3ms failure in the next row.
 		await session.prompt(
-			"Call the checkpoint tool. summary: 'Found secret codes in haystack files'. " +
+			"Call the checkpoint tool with continue: true. summary must be an object with all five fields: " +
+				"{goal: 'Found secret codes in haystack files', " +
+				"filesTouched: ['haystack_1.ts','haystack_2.ts','haystack_3.ts','haystack_4.ts','haystack_5.ts'], " +
+				"decisions: ['none'], triedAndFailed: ['none'], constraints: 'none'}. " +
 				"Include all 5 haystack files (haystack_1.ts through haystack_5.ts) in relevantPaths.",
 		);
 		await waitForSettled(session);
@@ -365,7 +375,8 @@ describe("checkpoint: sibling tool in the same turn", () => {
 		await session.prompt(
 			"Issue BOTH tool calls together in a single assistant response (parallel tool calls): " +
 				"(1) read haystack_1.ts with offset=1 and limit=30; " +
-				"(2) checkpoint with summary 'Checkpoint batched with a read' and relevantPaths [haystack_1.ts]. " +
+				"(2) checkpoint with summary {goal: 'Checkpoint batched with a read', filesTouched: ['haystack_1.ts'], " +
+				"decisions: ['none'], triedAndFailed: ['none'], constraints: 'none'} and relevantPaths [haystack_1.ts]. " +
 				"Both tool calls must be in the same message.",
 		);
 		await waitForSettled(session);
@@ -385,7 +396,7 @@ describe("checkpoint: sibling tool in the same turn", () => {
 
 interface CompactSpyCall {
 	customInstructions?: string;
-	onComplete?: (result: unknown) => void;
+	onComplete?: (result: unknown) => void | Promise<void>;
 	onError?: (error: Error) => void;
 }
 
@@ -393,6 +404,17 @@ interface HarnessCtxOptions {
 	/** Entries returned by `ctx.sessionManager.getEntries()`. */
 	entries?: any[];
 	contextWindow?: number;
+	/** What pi's `getContextUsage()` reports as live context tokens; null = pi has no estimate. */
+	tokens?: number | null;
+}
+
+/** The summary object the tool schema requires (the wire shape, restated). */
+interface SummaryInput {
+	goal: string;
+	filesTouched: string[];
+	decisions: string[];
+	triedAndFailed: string[];
+	constraints: string;
 }
 
 /**
@@ -404,6 +426,7 @@ interface HarnessCtxOptions {
  */
 function makeCheckpointHarness() {
 	const tools = new Map<string, any>();
+	const commands = new Map<string, any>();
 	const handlers = new Map<string, Array<(event: any, ctx: any) => unknown>>();
 	const sent: Array<{ text: string; options?: unknown }> = [];
 	const compactCalls: CompactSpyCall[] = [];
@@ -417,7 +440,9 @@ function makeCheckpointHarness() {
 		registerTool: (def: any) => {
 			tools.set(def.name, def);
 		},
-		registerCommand: () => {},
+		registerCommand: (name: string, def: any) => {
+			commands.set(name, def);
+		},
 		sendUserMessage: (text: string, options?: unknown) => {
 			sent.push({ text, options });
 		},
@@ -427,6 +452,11 @@ function makeCheckpointHarness() {
 	const makeCtx = (cwd: string, opts: HarnessCtxOptions = {}) => ({
 		cwd,
 		model: { contextWindow: opts.contextWindow ?? 200_000 },
+		getContextUsage: () => ({
+			tokens: opts.tokens ?? null,
+			contextWindow: opts.contextWindow ?? 200_000,
+			percent: null,
+		}),
 		ui: {
 			notify: (message: string, level: string) => notifications.push({ message, level }),
 		},
@@ -447,7 +477,84 @@ function makeCheckpointHarness() {
 		return results;
 	};
 
-	return { tools, makeCtx, emit, sent, compactCalls, notifications };
+	return { tools, commands, makeCtx, emit, sent, compactCalls, notifications };
+}
+
+// ---------------------------------------------------------------------------
+// Deterministic checkpoint driver + fixtures
+// ---------------------------------------------------------------------------
+
+/** The schema's fields with the `"none"` slots pre-filled, each overridable. */
+function summaryFields(over: Partial<SummaryInput> = {}): SummaryInput {
+	return {
+		goal: "deterministic summary",
+		filesTouched: [],
+		decisions: ["none"],
+		triedAndFailed: ["none"],
+		constraints: "none",
+		...over,
+	};
+}
+
+/** The meta record written beside an archive. */
+async function readMeta(archivePath: string): Promise<any> {
+	return JSON.parse(await readFile(archivePath.replace(/\.jsonl$/, ".meta.json"), "utf8"));
+}
+
+/** The archive path the checkpoint tool reports in its result text. */
+function archivePathFrom(result: any): string {
+	const text = String(result.content[0].text);
+	const match = text.match(/`([^`]+\.jsonl)`/);
+	if (!match) throw new Error(`no archive path in tool result:\n${text}`);
+	return match[1];
+}
+
+/** Run one deterministic checkpoint to completion (execute → turn_end → onComplete). */
+async function runCheckpoint(
+	h: ReturnType<typeof makeCheckpointHarness>,
+	ctx: any,
+	args: Record<string, unknown>,
+	onCompleteResult: Record<string, unknown> = {},
+) {
+	const result = await h.tools
+		.get("checkpoint")
+		.execute("call-1", { nextSteps: "NEXT-STEP", ...args }, undefined, undefined, ctx);
+	await h.emit("turn_end", ctx);
+	const compact = h.compactCalls[h.compactCalls.length - 1];
+	if (!compact) throw new Error("turn_end did not request a compaction");
+	await compact.onComplete?.(onCompleteResult);
+	return { result, compact };
+}
+
+function sh(cwd: string, args: string[]): string {
+	const res = spawnSync(args[0], args.slice(1), { cwd, encoding: "utf8" });
+	if (res.status !== 0) throw new Error(`${args.join(" ")} failed: ${res.stderr}`);
+	return res.stdout.trim();
+}
+
+/** A tmp cwd that is a git repo with one commit and a clean tree. */
+async function gitFixture(): Promise<string> {
+	const cwd = await mkdtemp(join(tmpdir(), "ckpt-git-"));
+	await writeFile(join(cwd, "tracked.txt"), "v1\n");
+	sh(cwd, ["git", "init", "-b", "main"]);
+	sh(cwd, ["git", "add", "tracked.txt"]);
+	sh(cwd, [
+		"git",
+		"-c",
+		"user.name=test",
+		"-c",
+		"user.email=test@example.com",
+		"commit",
+		"-m",
+		"init",
+	]);
+	return cwd;
+}
+
+/** pi's default session dir for a cwd (`getDefaultSessionDir` isn't exported). */
+function defaultSessionDir(cwd: string): string {
+	const safePath = `--${resolve(cwd).replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
+	return join(getAgentDir(), "sessions", safePath);
 }
 
 // ---------------------------------------------------------------------------
@@ -465,7 +572,7 @@ async function checkpointAndInject(
 	ctx: any,
 	opts: {
 		relevantPaths: string[];
-		summary?: string;
+		summary?: SummaryInput;
 		branchEntries?: any[];
 		firstKeptEntryId?: string;
 	},
@@ -474,7 +581,7 @@ async function checkpointAndInject(
 	await checkpoint.execute(
 		"call-1",
 		{
-			summary: opts.summary ?? "deterministic summary",
+			summary: opts.summary ?? summaryFields(),
 			nextSteps: "NEXT-STEP",
 			relevantPaths: opts.relevantPaths.map((path) => ({ path })),
 		},
@@ -507,7 +614,7 @@ describe("checkpoint: compaction trigger boundary (deterministic, ctx.compact sp
 
 			const result = await checkpoint.execute(
 				"call-1",
-				{ summary: "summary-one", nextSteps: "next-one" },
+				{ summary: summaryFields({ goal: "summary-one" }), nextSteps: "next-one" },
 				undefined,
 				undefined,
 				ctx,
@@ -541,8 +648,8 @@ describe("checkpoint: compaction trigger boundary (deterministic, ctx.compact sp
 			await h.emit("session_start", ctx);
 			const checkpoint = h.tools.get("checkpoint");
 
-			await checkpoint.execute("call-1", { summary: "first" }, undefined, undefined, ctx);
-			await checkpoint.execute("call-2", { summary: "second" }, undefined, undefined, ctx);
+			await checkpoint.execute("call-1", { summary: summaryFields({ goal: "first" }) }, undefined, undefined, ctx);
+			await checkpoint.execute("call-2", { summary: summaryFields({ goal: "second" }) }, undefined, undefined, ctx);
 			expect(h.compactCalls).toHaveLength(0);
 
 			await h.emit("turn_end", ctx);
@@ -562,7 +669,7 @@ describe("checkpoint: compaction trigger boundary (deterministic, ctx.compact sp
 			await h.emit("session_start", ctx);
 			const checkpoint = h.tools.get("checkpoint");
 
-			await checkpoint.execute("call-1", { summary: "failing" }, undefined, undefined, ctx);
+			await checkpoint.execute("call-1", { summary: summaryFields({ goal: "failing" }) }, undefined, undefined, ctx);
 			await h.emit("turn_end", ctx);
 			expect(h.compactCalls).toHaveLength(1);
 
@@ -572,10 +679,385 @@ describe("checkpoint: compaction trigger boundary (deterministic, ctx.compact sp
 			).toBe(true);
 
 			// No stuck pending request: a fresh checkpoint fires again.
-			await checkpoint.execute("call-2", { summary: "recovered" }, undefined, undefined, ctx);
+			await checkpoint.execute("call-2", { summary: summaryFields({ goal: "recovered" }) }, undefined, undefined, ctx);
 			await h.emit("turn_end", ctx);
 			expect(h.compactCalls).toHaveLength(2);
 			expect(h.compactCalls[1].customInstructions).toContain("recovered");
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	}, 30_000);
+});
+
+// ---------------------------------------------------------------------------
+// Summary schema, observability, and git binding (S-rows)
+// ---------------------------------------------------------------------------
+
+describe("checkpoint: summary schema, observability, git binding", () => {
+	it("S1: one renderer feeds customInstructions and the meta, section for section", async () => {
+		const h = makeCheckpointHarness();
+		const cwd = await mkdtemp(join(tmpdir(), "ckpt-meta-"));
+		try {
+			const ctx = h.makeCtx(cwd);
+			await h.emit("session_start", ctx);
+			const fields: SummaryInput = {
+				goal: "Wire the checkpoint summary schema",
+				filesTouched: ["extensions/checkpoint.ts", "tests/e2e-checkpoint.test.ts"],
+				decisions: ["kept nextSteps as the kickoff prompt"],
+				triedAndFailed: [
+					"a bare string summary — the schema rejected it: triedAndFailed was absent",
+				],
+				constraints: "compaction-model.ts is off limits",
+			};
+
+			const { result, compact } = await runCheckpoint(h, ctx, {
+				summary: fields,
+				nextSteps: "NEXT-STEP",
+			});
+
+			const instructions = String(compact.customInstructions);
+			expect(instructions.startsWith("[CHECKPOINT]\n")).toBe(true);
+			for (const label of [
+				"Goal:",
+				"Files touched:",
+				"Decisions:",
+				"Tried and failed (and why):",
+				"Constraints:",
+				"Next: NEXT-STEP",
+			]) {
+				expect(instructions).toContain(label);
+			}
+			expect(instructions).toContain(fields.goal);
+			expect(instructions).toContain("extensions/checkpoint.ts, tests/e2e-checkpoint.test.ts");
+			expect(instructions).toContain("  - a bare string summary");
+
+			const meta = await readMeta(archivePathFrom(result));
+			expect(meta.summaryFields).toEqual(fields);
+			// The compaction window and the meta read the *same* rendered text.
+			expect(meta.summary).toBe(instructions.replace("[CHECKPOINT]\n", ""));
+			// Meta keys are additive: the pre-schema record survives intact.
+			for (const key of ["timestamp", "sessionId", "archivePath", "summary", "entryCount"]) {
+				expect(meta).toHaveProperty(key);
+			}
+			expect(meta.sessionId).toBe("test-session");
+			expect(meta.archivePath).toBe(archivePathFrom(result));
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	it("S2: the literal none form is accepted and rendered as-is", async () => {
+		const h = makeCheckpointHarness();
+		const cwd = await mkdtemp(join(tmpdir(), "ckpt-meta-"));
+		try {
+			const ctx = h.makeCtx(cwd);
+			await h.emit("session_start", ctx);
+			const fields = summaryFields({ goal: "nothing to report" });
+
+			const { result, compact } = await runCheckpoint(h, ctx, { summary: fields });
+
+			const instructions = String(compact.customInstructions);
+			expect(instructions).toContain("Files touched: none");
+			expect(instructions).toContain("Decisions: none");
+			expect(instructions).toContain("Tried and failed (and why): none");
+			expect(instructions).toContain("Constraints: none");
+
+			const meta = await readMeta(archivePathFrom(result));
+			expect(meta.summaryFields).toEqual(fields);
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	it("S3: the typebox schema, not a runtime check, requires every field", async () => {
+		const h = makeCheckpointHarness();
+		// Exactly what pi's tool-call validator compiles before calling execute()
+		// (`validateToolArguments` in pi-ai's dist/utils/validation.js).
+		const schema = h.tools.get("checkpoint").parameters;
+
+		expect(Value.Check(schema, { summary: summaryFields({ goal: "g" }) })).toBe(true);
+
+		const { triedAndFailed: _omitted, ...withoutTried } = summaryFields();
+		const invalid = { summary: withoutTried };
+		expect(Value.Check(schema, invalid)).toBe(false);
+		const errors = Value.Errors(schema, invalid).map((e) => `${e.instancePath} ${e.message}`);
+		expect(errors.some((e) => e.includes("triedAndFailed"))).toBe(true);
+
+		// All five slots are declared required, on both tools.
+		const required = ["goal", "filesTouched", "decisions", "triedAndFailed", "constraints"];
+		for (const name of ["checkpoint", "checkpoint_fork"]) {
+			const summarySchema = h.tools.get(name).parameters.properties.summary;
+			expect(summarySchema.required).toEqual(required);
+		}
+	}, 30_000);
+
+	it("S4: nextSteps omitted still kicks off with 'Continue work'", async () => {
+		const h = makeCheckpointHarness();
+		const cwd = await mkdtemp(join(tmpdir(), "ckpt-meta-"));
+		try {
+			const ctx = h.makeCtx(cwd);
+			await h.emit("session_start", ctx);
+
+			const { compact } = await runCheckpoint(h, ctx, {
+				summary: summaryFields(),
+				nextSteps: undefined,
+			});
+
+			expect(String(compact.customInstructions)).toContain("Next: Continue work");
+			expect(h.sent.at(-1)?.text.split("\n")[0]).toBe("Continue work");
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	it("S5: continue keeps the follow-up shape — injection, kickoff, archive line", async () => {
+		const { h, cwd, ctx } = await injectionFixture();
+		try {
+			await emitRead(h, ctx, "haystack_1.ts", { offset: 1, limit: 50 });
+
+			const text = await checkpointAndInject(h, ctx, { relevantPaths: ["haystack_1.ts"] });
+
+			expect(text.split("\n")[0]).toContain("Disk snapshot taken at checkpoint time");
+			expect(text).toContain("NEXT-STEP");
+			expect(text.trimEnd().split("\n").at(-1)).toMatch(/^Archive: .*\.jsonl$/);
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	it("S6a: pi exposes a post-compaction count → notify and meta carry the delta", async () => {
+		const h = makeCheckpointHarness();
+		const cwd = await mkdtemp(join(tmpdir(), "ckpt-meta-"));
+		try {
+			// Deliberately different from pi's own `tokensBefore` (120,000): the
+			// compaction result is the authoritative count, so it must win.
+			const ctx = h.makeCtx(cwd, { tokens: 100_000 });
+			await h.emit("session_start", ctx);
+
+			const { result } = await runCheckpoint(h, ctx, { summary: summaryFields() }, {
+				tokensBefore: 120_000,
+				estimatedTokensAfter: 3_400,
+			});
+
+			const notify = h.notifications.find((n) => n.message.includes("Checkpoint complete"));
+			expect(notify).toBeDefined();
+			expect(notify!.message).toContain(
+				`Tokens: ${(120_000).toLocaleString()} → ${(3_400).toLocaleString()}`,
+			);
+			expect(notify!.message).toContain(`(${(3_400 - 120_000).toLocaleString()})`);
+
+			const meta = await readMeta(archivePathFrom(result));
+			expect(meta.tokens).toEqual({ before: 120_000, after: 3_400 });
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	it("S6b: no post count from pi → notify shows before only, meta.tokens.after is null", async () => {
+		const h = makeCheckpointHarness();
+		const cwd = await mkdtemp(join(tmpdir(), "ckpt-meta-"));
+		try {
+			const ctx = h.makeCtx(cwd, { tokens: 88_000 });
+			await h.emit("session_start", ctx);
+
+			const { result } = await runCheckpoint(h, ctx, { summary: summaryFields() }, {});
+
+			const notify = h.notifications.find((n) => n.message.includes("Checkpoint complete"));
+			expect(notify!.message).toContain(`Tokens: ${(88_000).toLocaleString()}`);
+			expect(notify!.message).not.toContain("→");
+
+			const meta = await readMeta(archivePathFrom(result));
+			expect(meta.tokens).toEqual({ before: 88_000, after: null });
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	it("S6c: pi can estimate nothing → no token text in the notify, both meta counts null", async () => {
+		const h = makeCheckpointHarness();
+		const cwd = await mkdtemp(join(tmpdir(), "ckpt-meta-"));
+		try {
+			const ctx = h.makeCtx(cwd, { tokens: null });
+			await h.emit("session_start", ctx);
+
+			const { result } = await runCheckpoint(h, ctx, { summary: summaryFields() }, {});
+
+			const notify = h.notifications.find((n) => n.message.includes("Checkpoint complete"));
+			expect(notify).toBeDefined();
+			expect(notify!.message).not.toContain("Tokens:");
+
+			const meta = await readMeta(archivePathFrom(result));
+			expect(meta.tokens).toEqual({ before: null, after: null });
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	it("S7: /checkpoints reads the richer meta — goal headline plus the git ref", async () => {
+		const h = makeCheckpointHarness();
+		const cwd = await gitFixture();
+		try {
+			const ctx = h.makeCtx(cwd, { tokens: 12_000 });
+			await h.emit("session_start", ctx);
+			const { result } = await runCheckpoint(h, ctx, {
+				summary: summaryFields({ goal: "list me by my goal line" }),
+			});
+			const meta = await readMeta(archivePathFrom(result));
+
+			await h.commands.get("checkpoints").handler("", ctx);
+
+			const listing = h.notifications.filter((n) => n.message.includes("Checkpoints in")).at(-1);
+			expect(listing).toBeDefined();
+			expect(listing!.message).toContain("— Goal: list me by my goal line");
+			expect(listing!.message).toContain(
+				`[${meta.git.branch}@${String(meta.git.head).slice(0, 7)}]`,
+			);
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	it("S8: binds the archive to the git ref, captured before the archive itself is written", async () => {
+		const h = makeCheckpointHarness();
+		const cwd = await gitFixture();
+		try {
+			const head = sh(cwd, ["git", "rev-parse", "HEAD"]);
+			const branch = sh(cwd, ["git", "rev-parse", "--abbrev-ref", "HEAD"]);
+			const ctx = h.makeCtx(cwd);
+			await h.emit("session_start", ctx);
+
+			const first = await runCheckpoint(h, ctx, { summary: summaryFields() });
+			const firstMeta = await readMeta(archivePathFrom(first.result));
+			expect(firstMeta.git).toEqual({ head, branch, dirty: false });
+
+			// The archive's own `.pi/checkpoints` files are untracked, so a second
+			// checkpoint taken after them reports the tree as dirty — proof the
+			// first capture happened before the write, not after it.
+			const second = await runCheckpoint(h, ctx, { summary: summaryFields() });
+			const secondMeta = await readMeta(archivePathFrom(second.result));
+			expect(secondMeta.git).toEqual({ head, branch, dirty: true });
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	it("S9: non-git cwd → git is null, archive still written, checkpoint proceeds", async () => {
+		const h = makeCheckpointHarness();
+		const cwd = await mkdtemp(join(tmpdir(), "ckpt-nogit-"));
+		try {
+			const ctx = h.makeCtx(cwd);
+			await h.emit("session_start", ctx);
+
+			const { result } = await runCheckpoint(h, ctx, {
+				summary: summaryFields({ goal: "no repo here" }),
+			});
+
+			const meta = await readMeta(archivePathFrom(result));
+			expect(meta.git).toBeNull();
+			expect(meta.summary.startsWith("Goal: no repo here")).toBe(true);
+			expect(h.notifications.some((n) => n.message.includes("Checkpoint complete"))).toBe(true);
+			expect(h.sent.at(-1)?.text.split("\n")[0]).toBe("NEXT-STEP");
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	it("S11: fork binds the source ref, records newCwd, seeds the rendered summary", async () => {
+		const h = makeCheckpointHarness();
+		const sourceCwd = await gitFixture();
+		const targetCwd = await mkdtemp(join(tmpdir(), "ckpt-fork-target-"));
+		const notifications: Array<{ message: string; level: string }> = [];
+		const switched: { path?: string; followUp?: string[] } = {};
+		try {
+			const head = sh(sourceCwd, ["git", "rev-parse", "HEAD"]);
+			const branch = sh(sourceCwd, ["git", "rev-parse", "--abbrev-ref", "HEAD"]);
+			const ctx = h.makeCtx(sourceCwd, { tokens: 4_321 });
+			await h.emit("session_start", ctx);
+			const fields = summaryFields({ goal: "Fork into the target dir", filesTouched: ["tracked.txt"] });
+
+			const result = await h.tools
+				.get("checkpoint_fork")
+				.execute(
+					"call-fork",
+					{ newCwd: targetCwd, summary: fields, nextSteps: "NEXT-STEP" },
+					undefined,
+					undefined,
+					ctx,
+				);
+			expect(String(result.content[0].text)).toContain("Fork prepared");
+
+			// /go commits the staged fork (takePendingGo is what /go itself calls,
+			// so the global staging slot is left clean).
+			const action = takePendingGo();
+			expect(action).not.toBeNull();
+			const cmdCtx = {
+				...ctx,
+				ui: { notify: (message: string, level: string) => notifications.push({ message, level }) },
+				getContextUsage: () => ({ tokens: 4_321, contextWindow: 200_000, percent: 2 }),
+				switchSession: async (path: string, opts: any) => {
+					switched.path = path;
+					await opts?.withSession?.({
+						sendUserMessage: async (text: string) => {
+							switched.followUp = [text];
+						},
+					});
+				},
+			};
+			await action!.run(cmdCtx as any);
+
+			const archives = (await readdir(join(sourceCwd, ".pi", "checkpoints"))).filter((f) =>
+				f.endsWith(".meta.json"),
+			);
+			expect(archives).toHaveLength(1);
+			const meta = JSON.parse(
+				await readFile(join(sourceCwd, ".pi", "checkpoints", archives[0]), "utf8"),
+			);
+			expect(meta.git).toEqual({ head, branch, dirty: false });
+			expect(meta.newCwd).toBe(targetCwd);
+			expect(meta.summaryFields).toEqual(fields);
+			expect(meta.summary.startsWith("Goal: Fork into the target dir")).toBe(true);
+			expect(meta.sessionId).toBe("test-session");
+
+			// The fork's seeded message is the rendered summary — the same string.
+			expect(switched.path).toBeDefined();
+			const entries = (await readFile(switched.path!, "utf8"))
+				.trim()
+				.split("\n")
+				.map((line) => JSON.parse(line));
+			const seeded = entries.find(
+				(e: any) => e.type === "message" && e.message?.role === "assistant",
+			);
+			expect(seeded.message.content[0].text).toBe(meta.summary);
+			expect(switched.followUp?.[0]).toBe("NEXT-STEP");
+		} finally {
+			await rm(sourceCwd, { recursive: true, force: true });
+			await rm(targetCwd, { recursive: true, force: true });
+			await rm(defaultSessionDir(targetCwd), { recursive: true, force: true });
+		}
+	}, 60_000);
+
+	it("S12: marker dispatch is untouched — the compaction takes the rendered text", async () => {
+		const h = makeCheckpointHarness();
+		const cwd = await mkdtemp(join(tmpdir(), "ckpt-meta-"));
+		try {
+			const ctx = h.makeCtx(cwd);
+			await h.emit("session_start", ctx);
+			const { compact } = await runCheckpoint(h, ctx, { summary: summaryFields() });
+
+			const results = await h.emit("session_before_compact", ctx, {
+				customInstructions: compact.customInstructions,
+				preparation: { firstKeptEntryId: "entry-0", tokensBefore: 1000 },
+				branchEntries: [],
+				reason: "manual",
+				willRetry: false,
+			});
+			const compaction = (results[0] as any).compaction;
+			expect(compaction.summary).toBe(
+				String(compact.customInstructions).replace("[CHECKPOINT]", "").trim(),
+			);
+			expect(compaction.summary).toContain("Tried and failed (and why):");
+			expect(compaction.firstKeptEntryId).toBe("entry-0");
+			expect(compaction.tokensBefore).toBe(1000);
 		} finally {
 			await rm(cwd, { recursive: true, force: true });
 		}
@@ -917,7 +1399,9 @@ describe("checkpoint: the injection is what answers", () => {
 		// follow-up is the only channel the needles can arrive through.
 		await session.prompt(
 			"Call the checkpoint tool now with these exact arguments: " +
-				"summary: 'Read five haystack files; no findings recorded.'; continue: true; " +
+				"summary: {goal: 'Read five haystack files; no findings recorded.', " +
+				"filesTouched: ['haystack_1.ts','haystack_2.ts','haystack_3.ts','haystack_4.ts','haystack_5.ts'], " +
+				"decisions: ['none'], triedAndFailed: ['none'], constraints: 'none'}; continue: true; " +
 				"relevantPaths: [{path:'haystack_1.ts'},{path:'haystack_2.ts'},{path:'haystack_3.ts'}," +
 				"{path:'haystack_4.ts'},{path:'haystack_5.ts'}]; " +
 				`nextSteps: ${JSON.stringify(NEEDLE_QUESTION)}`,
