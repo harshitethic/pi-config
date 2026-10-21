@@ -16,6 +16,38 @@ refactor lands.
 | area | strikes (landing or refusal) | state | refactor |
 |---|---|---|---|
 | `extensions/{checkpoint,auto-checkpoint}` read tracking | 1 (2026-10-21) | open — one duplicate copy remains in `auto-checkpoint.ts` (blocked: another session's WIP, migration order pending owner ruling) | fold `auto-checkpoint.ts` onto `extensions/lib/read-tracking.ts` |
+| `extensions/checkpoint.ts` growth | 1 (2026-10-21) | open — extraction candidate named (below); a second growth landing closes this area | extract `runGit`/`captureGitBinding`/`tokensBefore`/`renderTokenDelta`/`recordTokensAfter` to `extensions/lib/` |
+
+## 2026-10-21 — chunk: WO-2026-056 summary schema + observability (`4b2861c..f2cbcbc`)
+
+1 commit (harness-squashed), 3 files: fixed summary schema on both checkpoint
+tools (5 required fields incl. `triedAndFailed`, one `renderSummary` with three
+consumers), token before/after + summary in notify and archive meta, git-ref
+binding in meta. Review: review-code APPROVED_WITH_NOTES, review-tests APPROVED
+(2 rounds). Excluded as before: another session's uncommitted
+`auto-checkpoint.ts` + `settings.json` + `decisions/settings/**`.
+
+### Growth
+
+| file | now | base (`59655ec`) | Δ |
+|---|---:|---:|---:|
+| `extensions/checkpoint.ts` | 901 | 664 | **+237** |
+
+One feature landed almost entirely in one file. The growth is cohesive (schema+
+renderer block, git+tokens block) and single-sourced (one renderer, one meta
+writer + one token patch), so this is a growth strike with a named candidate —
+see the register. If the next landing grows this file again, the area closes and
+the extraction becomes a mandatory order before further feature work here.
+
+### Unification
+
+- One renderer, three consumers (`customInstructions`, meta, fork message) —
+  asserted as such; no per-consumer formatting copy.
+- Meta shape unified across all three archive sites (checkpoint, fork, and the
+  auto-compaction path now writes the same keys).
+- New seam worth watching (not yet a candidate): `metaPathFor`'s
+  `.jsonl`→`.meta.json` convention is mirrored in the test-local `readMeta`
+  helper — unavoidable test mirror, no production duplicate.
 
 ## 2026-10-21 — chunk: WO-2026-055 checkpoint injection fix (`689de07..59655ec`)
 
