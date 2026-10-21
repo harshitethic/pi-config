@@ -16,6 +16,7 @@ import {
 	formatRanges,
 	mergeRegions,
 	normalizePath,
+	selectFreshRegions,
 } from "../extensions/lib/read-tracking";
 
 const END = Number.MAX_SAFE_INTEGER;
@@ -170,10 +171,14 @@ describe("ReadTracker", () => {
 });
 
 describe("collectPreservedReadPaths", () => {
+	// pi's session-entry shape: assistant tool calls are `toolCall`/`arguments`.
 	const readCall = (path: string) => ({
 		id: "",
 		type: "message",
-		message: { role: "assistant", content: [{ type: "tool_use", name: "read", input: { path } }] },
+		message: {
+			role: "assistant",
+			content: [{ type: "toolCall", id: "call-1", name: "read", arguments: { path } }],
+		},
 	});
 	const entry = (id: string, path: string) => ({ ...readCall(path), id });
 
@@ -199,9 +204,96 @@ describe("collectPreservedReadPaths", () => {
 
 	it("ignores non-read tool calls and non-assistant entries", () => {
 		const entries = [
-			{ id: "e1", type: "message", message: { role: "user", content: [{ type: "tool_use", name: "read", input: { path: "u.ts" } }] } },
-			{ id: "e2", type: "message", message: { role: "assistant", content: [{ type: "tool_use", name: "bash", input: { path: "b.ts" } }] } },
+			{ id: "e1", type: "message", message: { role: "user", content: [{ type: "toolCall", id: "c1", name: "read", arguments: { path: "u.ts" } }] } },
+			{ id: "e2", type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "c2", name: "bash", arguments: { path: "b.ts" } }] } },
 		];
 		expect(collectPreservedReadPaths(entries, "e1", "/repo").size).toBe(0);
+	});
+
+	it("matches nothing for the wire-adapter block shape (tool_use/input)", () => {
+		const entries = [
+			{ id: "e1", type: "message", message: { role: "assistant", content: [{ type: "tool_use", name: "read", input: { path: "a.ts" } }] } },
+		];
+		expect(collectPreservedReadPaths(entries, "e1", "/repo").size).toBe(0);
+	});
+});
+
+describe("ReadTracker.recordToolResult", () => {
+	const result = (over: Record<string, unknown> = {}) => ({
+		toolName: "read",
+		isError: false,
+		input: { path: "a.ts", offset: 3, limit: 7 },
+		...over,
+	});
+
+	it("takes path/offset/limit from the finalized input, with the file's stat", async () => {
+		const cwd = await mkdtemp(join(tmpdir(), "read-tracking-"));
+		try {
+			await writeFile(join(cwd, "a.ts"), "one\ntwo\nthree\nfour\nfive\n");
+			const reads = new ReadTracker();
+			await reads.recordToolResult(result(), cwd);
+
+			const regions = reads.regionsFor("a.ts", cwd);
+			expect(regions).toHaveLength(1);
+			expect(regions?.[0].offset).toBe(3);
+			expect(regions?.[0].limit).toBe(7);
+			expect(regions?.[0].size).toBe(24);
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	});
+
+	it("defaults an unqualified read to line 1 to end", async () => {
+		const reads = new ReadTracker();
+		await reads.recordToolResult(result({ input: { path: "a.ts" } }), "/repo");
+		expect(reads.regionsFor("a.ts", "/repo")).toEqual([
+			{ offset: 1, limit: END, size: undefined, mtimeMs: undefined },
+		]);
+	});
+
+	it("coerces an unusable offset to line 1 (the read tool validates it upstream)", async () => {
+		const reads = new ReadTracker();
+		for (const offset of [0, -3, Number.NaN, "7"]) {
+			await reads.recordToolResult(result({ input: { path: "a.ts", offset, limit: 5 } }), "/repo");
+		}
+		expect(reads.regionsFor("a.ts", "/repo")?.map((r) => r.offset)).toEqual([1, 1, 1, 1]);
+	});
+
+	it("keeps a zero limit as an empty window and defaults a nonsensical one to 'to end'", async () => {
+		const reads = new ReadTracker();
+		await reads.recordToolResult(result({ input: { path: "a.ts", limit: 0 } }), "/repo");
+		await reads.recordToolResult(result({ input: { path: "a.ts", limit: Number.POSITIVE_INFINITY } }), "/repo");
+		expect(reads.regionsFor("a.ts", "/repo")).toEqual([
+			{ offset: 1, limit: 0, size: undefined, mtimeMs: undefined },
+			{ offset: 1, limit: END, size: undefined, mtimeMs: undefined },
+		]);
+	});
+
+	it("ignores error results, other tools, and pathless inputs", async () => {
+		const reads = new ReadTracker();
+		await reads.recordToolResult(result({ isError: true }), "/repo");
+		await reads.recordToolResult(result({ toolName: "bash" }), "/repo");
+		await reads.recordToolResult(result({ input: {} }), "/repo");
+		await reads.recordToolResult(result({ input: { path: 42 } }), "/repo");
+		expect(reads.size).toBe(0);
+	});
+});
+
+describe("selectFreshRegions", () => {
+	const region = (size: number, mtimeMs: number) => ({ offset: 1, limit: 5, size, mtimeMs });
+
+	it("keeps windows whose file identity matches the current snapshot", () => {
+		const fresh = region(10, 1000);
+		expect(selectFreshRegions([fresh], { size: 10, mtimeMs: 1000 })).toEqual([fresh]);
+	});
+
+	it("drops a window when the file grew, shrank, or was rewritten", () => {
+		const before = region(10, 1000);
+		expect(selectFreshRegions([before], { size: 12, mtimeMs: 2000 })).toEqual([]);
+		expect(selectFreshRegions([before], { size: 10, mtimeMs: 2000 })).toEqual([]);
+	});
+
+	it("drops a window recorded without a stat: it can never be proven fresh", () => {
+		expect(selectFreshRegions([{ offset: 1, limit: 5 }], { size: 10, mtimeMs: 1000 })).toEqual([]);
 	});
 });

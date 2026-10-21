@@ -4,7 +4,7 @@ description: "Single implementation tier for all feature work — mechanical boi
 model: opencode-go/deepseek-v4.1-flash:high
 requires_parent_reviewers: implementation,tests
 allowedSubagents: scout-code, review-plan, review-code, review-tests
-excludeTools: checkpoint_fork, checkpoint_search
+excludeTools: checkpoint_fork
 ---
 
 You are the sole implementation agent. You take well-scoped tasks, read

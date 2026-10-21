@@ -1,9 +1,12 @@
 /**
  * E2E tests for the checkpoint extension.
  *
- * Drives real pi agent sessions via the SDK — loads the actual checkpoint.ts
- * extension, sends prompts that cause the agent to read files and call the
- * checkpoint tool, then verifies compaction, file injection, and search.
+ * Two layers:
+ *   - live sessions via the SDK (real model): compaction, pairing, and one
+ *     end-to-end flow where the answer can only come from the injection;
+ *   - a deterministic handler-table harness driving the real extension's
+ *     handlers with real files: read tracking and file injection, where model
+ *     compliance has no say.
  *
  * Run:
  *   bash tests/setup.sh        # one-time: link global pi packages
@@ -11,7 +14,7 @@
  */
 
 import { describe, expect, it, beforeAll, afterAll } from "bun:test";
-import { mkdtemp, writeFile, rm, readdir, mkdir } from "node:fs/promises";
+import { mkdtemp, writeFile, readFile, rm, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -40,7 +43,7 @@ const NEEDLES = [
 	"SILVER-PANGOLIN-9470",
 ];
 
-const TOOLS = ["read", "bash", "checkpoint", "checkpoint_fork", "checkpoint_search"];
+const TOOLS = ["read", "bash", "checkpoint", "checkpoint_fork"];
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -323,6 +326,13 @@ describe("checkpoint: basic flow", () => {
 
 	it("agent answers from injected context without tools", async () => {
 		const { session, sessionManager } = env;
+
+		// The checkpoint above carried the read windows into the follow-up
+		// message, so an answer from context is an answer from the injection.
+		const injected = getUserTexts(sessionManager).filter((t) => t.includes("[haystack_1.ts]"));
+		expect(injected).toHaveLength(1);
+		for (const needle of NEEDLES) expect(injected[0]).toContain(needle);
+
 		await session.prompt(
 			"Without using read, bash, grep, or any tools — answer purely from the context above. " +
 				"What are the 5 secret activation codes hidden in the haystack files? " +
@@ -335,93 +345,6 @@ describe("checkpoint: basic flow", () => {
 		for (const needle of NEEDLES) {
 			expect(lastResponse).toContain(needle);
 		}
-	}, 60_000);
-});
-
-describe("checkpoint: partial read injects only read regions", () => {
-	let env: Awaited<ReturnType<typeof setupSession>>;
-
-	beforeAll(async () => {
-		env = await setupSession();
-	});
-	afterAll(async () => env.cleanup());
-
-	it("reads only first 5 lines (needle at line 10 NOT in read region)", async () => {
-		const { session, sessionManager } = env;
-		await session.prompt(
-			"Use the read tool with offset=1 and limit=5 to read haystack_1.ts. " +
-				"Report exactly what you see.",
-		);
-		await waitForSettled(session);
-
-		const assistantTexts = getAssistantTexts(sessionManager).join("\n");
-		// The needle at line 10 should NOT be visible from reading only 5 lines
-		expect(assistantTexts).not.toContain(NEEDLES[0]);
-	}, 60_000);
-
-	it("checkpoints and verifies only read regions are injected", async () => {
-		const { session, sessionManager } = env;
-
-		await session.prompt(
-			"Call the checkpoint tool. summary: 'Investigating haystack_1.ts'. " +
-				"Include haystack_1.ts in relevantPaths. Do NOT call read.",
-		);
-		await waitForSettled(session);
-
-		// Compaction may or may not happen — model compliance with checkpoint
-		// instructions is advisory, especially with tiny context.
-		if (compactionCount(sessionManager) === 0) return;
-
-		// Check the user messages for injected content
-		const userTexts = getUserTexts(sessionManager);
-		const injectedMessages = userTexts.filter((t) =>
-			t.includes("[haystack_1.ts]"),
-		);
-		if (injectedMessages.length > 0) {
-			// If the model included relevantPaths, verify partial-read behavior
-			const injectedText = injectedMessages.join("\n");
-			expect(injectedText).not.toContain(NEEDLES[0]);
-			expect(injectedText).toContain("placeholder");
-			expect(injectedText).toContain("offset=");
-		}
-		// If the model didn't include relevantPaths, the test still passes —
-		// model compliance with relevantPaths is advisory, not guaranteed.
-	}, 120_000);
-});
-
-describe("checkpoint_search: searches archive content", () => {
-	let env: Awaited<ReturnType<typeof setupSession>>;
-
-	beforeAll(async () => {
-		env = await setupSession();
-		const { session } = env;
-
-		// Read files and checkpoint to create an archive
-		await session.prompt(
-			"Read the first 30 lines of haystack_1.ts through haystack_5.ts. Use 5 read calls.",
-		);
-		await waitForSettled(session);
-
-		await session.prompt(
-			"Call the checkpoint tool. summary: 'Done reading files'. " +
-				"Include all 5 haystack files in relevantPaths. This is a test requirement.",
-		);
-		await waitForSettled(session);
-	}, 120_000);
-	afterAll(async () => env.cleanup());
-
-	it("finds SECRET pattern in archived session", async () => {
-		const { session, sessionManager } = env;
-		await session.prompt(
-			"Use the checkpoint_search tool to search for the pattern 'SECRET' in the archives. " +
-				"Report the activation codes you find in the search results.",
-		);
-		await waitForSettled(session);
-
-		const assistantTexts = getAssistantTexts(sessionManager).join("\n");
-		// The search results should contain the needle codes from the archived read results
-		const found = NEEDLES.filter((n) => assistantTexts.includes(n));
-		expect(found.length).toBeGreaterThanOrEqual(1);
 	}, 60_000);
 });
 
@@ -660,30 +583,370 @@ describe("checkpoint: compaction trigger boundary (deterministic, ctx.compact sp
 });
 
 // ---------------------------------------------------------------------------
-// Read tracking (deterministic, captured handler table)
+// File injection (deterministic, captured handler table + real files)
 // ---------------------------------------------------------------------------
 
-describe("checkpoint: read-window tracking (deterministic)", () => {
-	it("records a read window from a tool event carrying args (pre-fix sourcing)", async () => {
-		const h = makeCheckpointHarness();
-		const cwd = await mkdtemp(join(tmpdir(), "ckpt-tracking-"));
-		try {
-			await createHaystackFiles(cwd);
-			const ctx = h.makeCtx(cwd);
-			await h.emit("session_start", ctx);
+/** A harness with haystack files on disk and the session's read tracker cleared. */
+async function injectionFixture() {
+	const h = makeCheckpointHarness();
+	const cwd = await mkdtemp(join(tmpdir(), "ckpt-injection-"));
+	await createHaystackFiles(cwd);
+	const ctx = h.makeCtx(cwd);
+	await h.emit("session_start", ctx);
+	return { h, cwd, ctx };
+}
 
-			await h.emit("tool_execution_end", ctx, {
-				toolCallId: "t1",
-				toolName: "read",
-				isError: false,
-				args: { path: "haystack_1.ts", offset: 1, limit: 5 },
-			});
+/** Fire the `tool_result` pi fires for a finished read call (finalized args on `input`). */
+async function emitRead(
+	h: ReturnType<typeof makeCheckpointHarness>,
+	ctx: any,
+	path: string,
+	args: { offset?: number; limit?: number } = {},
+) {
+	await h.emit("tool_result", ctx, {
+		toolCallId: `call-${path}-${args.offset ?? 1}-${args.limit ?? "end"}`,
+		toolName: "read",
+		input: { path, ...args },
+		content: [{ type: "text", text: "file contents" }],
+		isError: false,
+	});
+}
+
+/** An assistant entry whose `read` tool call survives the compaction boundary. */
+function keptReadEntry(id: string, path: string) {
+	return {
+		id,
+		type: "message",
+		parentId: null,
+		message: {
+			role: "assistant",
+			content: [{ type: "toolCall", id: `call-${id}`, name: "read", arguments: { path, offset: 1, limit: 50 } }],
+		},
+	};
+}
+
+const PRESERVED_NOTE = /already in preserved context — skipped/;
+
+describe("checkpoint: file injection (deterministic, captured handlers)", () => {
+	it("M1: injects a file whose read was tracked from tool_result.input", async () => {
+		const { h, cwd, ctx } = await injectionFixture();
+		try {
+			await emitRead(h, ctx, "haystack_1.ts", { offset: 1, limit: 50 });
 
 			const text = await checkpointAndInject(h, ctx, { relevantPaths: ["haystack_1.ts"] });
+
 			expect(text).toContain("[haystack_1.ts]");
-			expect(text).toContain("placeholder_001");
+			expect(text).toContain(NEEDLES[0]);
+			expect(text).toContain("NEXT-STEP");
 		} finally {
 			await rm(cwd, { recursive: true, force: true });
 		}
 	}, 30_000);
+
+	it("M2: skips a file whose read survives in the preserved tail", async () => {
+		const { h, cwd, ctx } = await injectionFixture();
+		try {
+			await emitRead(h, ctx, "haystack_1.ts", { offset: 1, limit: 50 });
+
+			const text = await checkpointAndInject(h, ctx, {
+				relevantPaths: ["haystack_1.ts"],
+				branchEntries: [keptReadEntry("kept", "haystack_1.ts")],
+				firstKeptEntryId: "kept",
+			});
+
+			expect(text).not.toContain("[haystack_1.ts]");
+			expect(text).not.toContain(NEEDLES[0]);
+			expect(text).toMatch(PRESERVED_NOTE);
+			expect(text).toContain("haystack_1.ts");
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	it("M3: does not inject a relevantPaths file that was never read", async () => {
+		const { h, cwd, ctx } = await injectionFixture();
+		try {
+			await emitRead(h, ctx, "haystack_1.ts", { offset: 1, limit: 50 });
+
+			const text = await checkpointAndInject(h, ctx, {
+				relevantPaths: ["haystack_1.ts", "haystack_2.ts"],
+			});
+
+			expect(text).toContain("[haystack_1.ts]");
+			expect(text).not.toContain("[haystack_2.ts]");
+			expect(text).not.toContain(NEEDLES[1]);
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	it("M4: injects only the read windows, annotated, with content outside them absent", async () => {
+		const { h, cwd, ctx } = await injectionFixture();
+		try {
+			await emitRead(h, ctx, "haystack_1.ts", { offset: 1, limit: 5 });
+			await emitRead(h, ctx, "haystack_1.ts", { offset: 20, limit: 3 });
+
+			const text = await checkpointAndInject(h, ctx, { relevantPaths: ["haystack_1.ts"] });
+
+			expect(text).toContain("placeholder_001");
+			expect(text).toContain("placeholder_005");
+			expect(text).toContain("placeholder_020");
+			expect(text).toContain("placeholder_022");
+			// Lines 6-19 were never read, and the needle sits at line 10.
+			expect(text).not.toContain("placeholder_006");
+			expect(text).not.toContain("placeholder_019");
+			expect(text).not.toContain(NEEDLES[0]);
+			// Continuation annotations, in the injection's own format.
+			expect(text).toContain("[L1-5 of 51 lines. offset=6 for more.]");
+			expect(text).toContain("[L20-22 of 51 lines. offset=23 for more.]");
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	it("M5: names budget-omitted files in the footnote and still injects what fits", async () => {
+		const h = makeCheckpointHarness();
+		const cwd = await mkdtemp(join(tmpdir(), "ckpt-injection-"));
+		try {
+			await createHaystackFiles(cwd);
+			// Whole-file blocks are ~616 tokens; a 5000-token window gives a
+			// ~750-token budget, so exactly one of the two fits.
+			const ctx = h.makeCtx(cwd, { contextWindow: 5000 });
+			await h.emit("session_start", ctx);
+			await emitRead(h, ctx, "haystack_1.ts", { offset: 1, limit: 50 });
+			await emitRead(h, ctx, "haystack_2.ts", { offset: 1, limit: 50 });
+
+			const text = await checkpointAndInject(h, ctx, {
+				relevantPaths: ["haystack_1.ts", "haystack_2.ts"],
+			});
+
+			expect(text).toContain("[haystack_1.ts]");
+			expect(text).toContain(NEEDLES[0]);
+			expect(text).not.toContain("[haystack_2.ts]");
+			expect(text).toMatch(/Omitted: haystack_2\.ts/);
+			expect(text).toContain("15% of context window");
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	it("M6: records nothing from tool_execution_end, which carries no args", async () => {
+		const { h, cwd, ctx } = await injectionFixture();
+		try {
+			// pi's actual shape: no args at all.
+			await h.emit("tool_execution_end", ctx, {
+				toolCallId: "t1",
+				toolName: "read",
+				result: {},
+				isError: false,
+			});
+			// The shape the dead tracking path assumed — still not a source.
+			await h.emit("tool_execution_end", ctx, {
+				toolCallId: "t2",
+				toolName: "read",
+				isError: false,
+				args: { path: "haystack_1.ts", offset: 1, limit: 50 },
+			});
+
+			const text = await checkpointAndInject(h, ctx, { relevantPaths: ["haystack_1.ts"] });
+
+			expect(text).not.toContain("[haystack_1.ts]");
+			expect(text).not.toContain(NEEDLES[0]);
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	it("M7: scopes the preserved-tail scan to branchEntries, so off-branch reads do not skip", async () => {
+		const { h, cwd, ctx } = await injectionFixture();
+		try {
+			await emitRead(h, ctx, "haystack_1.ts", { offset: 1, limit: 50 });
+
+			// The session history holds a read past the boundary on a branch that
+			// was abandoned; the compacting branch does not contain it.
+			const ctxWithHistory = h.makeCtx(cwd, {
+				entries: [
+					{ id: "boundary", type: "message", message: { role: "user", content: [] } },
+					keptReadEntry("off-branch", "haystack_1.ts"),
+				],
+			});
+
+			const text = await checkpointAndInject(h, ctxWithHistory, {
+				relevantPaths: ["haystack_1.ts"],
+				branchEntries: [{ id: "boundary", type: "message", message: { role: "user", content: [] } }],
+				firstKeptEntryId: "boundary",
+			});
+
+			expect(text).toContain("[haystack_1.ts]");
+			expect(text).toContain(NEEDLES[0]);
+			expect(text).not.toMatch(PRESERVED_NOTE);
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	it("M11: drops a window whose file changed since the read, and names the file", async () => {
+		const { h, cwd, ctx } = await injectionFixture();
+		try {
+			await emitRead(h, ctx, "haystack_1.ts", { offset: 1, limit: 50 });
+			await emitRead(h, ctx, "haystack_2.ts", { offset: 1, limit: 50 });
+
+			// Edited after the read: mtime and size both change.
+			const original = await readFile(join(cwd, "haystack_1.ts"), "utf-8");
+			await writeFile(join(cwd, "haystack_1.ts"), `// edited after read\n${original}`);
+
+			const text = await checkpointAndInject(h, ctx, {
+				relevantPaths: ["haystack_1.ts", "haystack_2.ts"],
+			});
+
+			expect(text).not.toContain("[haystack_1.ts]");
+			expect(text).not.toContain(NEEDLES[0]);
+			expect(text).toMatch(/changed since read — re-read if needed: haystack_1\.ts/);
+			// The untouched file is still injected normally in the same run.
+			expect(text).toContain("[haystack_2.ts]");
+			expect(text).toContain(NEEDLES[1]);
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	it("M12: never serves a shifted window after line insertions (eval S2)", async () => {
+		const { h, cwd, ctx } = await injectionFixture();
+		try {
+			const original = await readFile(join(cwd, "haystack_1.ts"), "utf-8");
+			// Read lines 1-15; the needle at line 10 is inside the window.
+			await emitRead(h, ctx, "haystack_1.ts", { offset: 1, limit: 15 });
+
+			// 20 lines inserted before it: the needle moves to line 30, so the
+			// recorded [1,15] window no longer covers it.
+			const inserted = Array.from({ length: 20 }, (_, i) => `// inserted ${i + 1}`).join("\n");
+			await writeFile(join(cwd, "haystack_1.ts"), `${inserted}\n${original}`);
+
+			const text = await checkpointAndInject(h, ctx, { relevantPaths: ["haystack_1.ts"] });
+
+			expect(text).not.toContain(NEEDLES[0]);
+			expect(text).not.toContain("inserted 1");
+			expect(text).not.toContain("placeholder");
+			expect(text).not.toContain("[L1-15");
+			expect(text).toMatch(/changed since read — re-read if needed: haystack_1\.ts/);
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	it("M13: starts tracking empty after a session switch", async () => {
+		const { h, cwd, ctx } = await injectionFixture();
+		const newCwd = await mkdtemp(join(tmpdir(), "ckpt-injection-new-"));
+		try {
+			await createHaystackFiles(newCwd);
+			await emitRead(h, ctx, "haystack_1.ts", { offset: 1, limit: 50 });
+
+			// What a fork's switch does: the new session starts, in the new cwd.
+			const newCtx = h.makeCtx(newCwd);
+			await h.emit("session_start", newCtx);
+
+			const text = await checkpointAndInject(h, newCtx, { relevantPaths: ["haystack_1.ts"] });
+
+			expect(text).not.toContain("[haystack_1.ts]");
+			expect(text).not.toContain(NEEDLES[0]);
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+			await rm(newCwd, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	it("M14: labels the injected block as a checkpoint-time disk snapshot", async () => {
+		const { h, cwd, ctx } = await injectionFixture();
+		try {
+			await emitRead(h, ctx, "haystack_1.ts", { offset: 1, limit: 50 });
+
+			const text = await checkpointAndInject(h, ctx, { relevantPaths: ["haystack_1.ts"] });
+
+			const header = text.split("\n")[0];
+			expect(header).toContain("Disk snapshot taken at checkpoint time");
+			expect(header).toContain("earlier read");
+			expect(header).toContain("line numbers may have shifted");
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	}, 30_000);
+});
+
+// ---------------------------------------------------------------------------
+// Injected context is what answers (kept-tail discipline)
+// ---------------------------------------------------------------------------
+
+const FILLER = Array.from(
+	{ length: 120 },
+	(_, i) =>
+		`filler-sentence-${i + 1}: the quick brown fox jumps over the lazy dog while the committee reviews routine paperwork.`,
+).join(" ");
+
+const NEEDLE_QUESTION =
+	"What are the five SECRET activation codes in the haystack files? " +
+	"Answer with all five codes if you know them; if you do not know a code, write UNKNOWN for that one. " +
+	"Reply with just the five codes. Answer from your current context only — do not use any tools.";
+
+describe("checkpoint: the injection is what answers", () => {
+	let env: Awaited<ReturnType<typeof setupSession>>;
+
+	beforeAll(async () => {
+		env = await setupSession();
+	});
+	afterAll(async () => env.cleanup());
+
+	it("M10: answers all 5 needles with no post-compaction read, needle never in the kept tail", async () => {
+		const { session, sessionManager } = env;
+
+		// Read a window containing each needle, without putting it in any text.
+		await session.prompt(
+			"Use the read tool 5 times in this turn: read haystack_1.ts, haystack_2.ts, haystack_3.ts, " +
+				"haystack_4.ts, haystack_5.ts with offset=1 and limit=15 each. " +
+				"Do not quote, list, or mention any line containing SECRET. Reply DONE.",
+		);
+		await waitForSettled(session);
+		// Pre-condition: nothing the model has said (and so nothing a summary
+		// could pick up) contains a needle yet.
+		expect(NEEDLES.filter((n) => getAssistantTexts(sessionManager).join("\n").includes(n))).toEqual([]);
+
+		// Push the read results out of the retained tail.
+		await session.prompt(`${FILLER}\n\nReply with exactly: OK`);
+		await waitForSettled(session);
+
+		// Checkpoint, carrying the question as the kickoff for the next turn. The
+		// follow-up is the only channel the needles can arrive through.
+		await session.prompt(
+			"Call the checkpoint tool now with these exact arguments: " +
+				"summary: 'Read five haystack files; no findings recorded.'; continue: true; " +
+				"relevantPaths: [{path:'haystack_1.ts'},{path:'haystack_2.ts'},{path:'haystack_3.ts'}," +
+				"{path:'haystack_4.ts'},{path:'haystack_5.ts'}]; " +
+				`nextSteps: ${JSON.stringify(NEEDLE_QUESTION)}`,
+		);
+		await waitForSettled(session);
+
+		expect(compactionCount(sessionManager)).toBeGreaterThanOrEqual(1);
+
+		// (a) the injection itself delivered the needles.
+		const injected = getUserTexts(sessionManager).filter((t) => t.includes("[haystack_1.ts]"));
+		expect(injected).toHaveLength(1);
+		for (const needle of NEEDLES) expect(injected[0]).toContain(needle);
+
+		// (b) nothing else after the compaction could have supplied them: no read
+		// result, and no needle in the summary the checkpoint handed the model.
+		const branch = sessionManager.getBranch() as any[];
+		const compactionIdx = branch.findIndex((e) => e.type === "compaction");
+		const after = branch.slice(compactionIdx + 1);
+		const postCompactionReads = after.filter(
+			(e) => e.type === "message" && e.message?.role === "toolResult" && e.message?.toolName === "read",
+		);
+		expect(postCompactionReads).toEqual([]);
+		for (const needle of NEEDLES) expect(branch[compactionIdx].summary).not.toContain(needle);
+
+		// (c) the answer carries all five.
+		const answers = after
+			.filter((e) => e.type === "message" && e.message?.role === "assistant")
+			.map((e) => getMessageText(e));
+		const answer = answers[answers.length - 1] ?? "";
+		for (const needle of NEEDLES) expect(answer).toContain(needle);
+	}, 300_000);
 });

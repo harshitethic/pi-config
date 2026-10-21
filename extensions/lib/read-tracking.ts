@@ -6,7 +6,13 @@
  * decide what file content to re-inject after compaction; `auto-checkpoint.ts`
  * uses them for its nudge's file hints.
  *
- * No pi runtime imports (types only) — this module must stay unit-testable.
+ * This is the one module that maps pi's shapes to read windows. Finalized read
+ * args arrive on `tool_result.input` (`tool_execution_end` carries no args at
+ * all), and session entries hold assistant tool calls as
+ * `{type:"toolCall", name, arguments}` — `tool_use`/`input` exists only in pi's
+ * Anthropic wire adapter, never in a session entry.
+ *
+ * No pi runtime imports — this module must stay unit-testable.
  */
 import { stat } from "node:fs/promises";
 import { relative, resolve as resolvePath } from "node:path";
@@ -83,6 +89,43 @@ export function formatRanges(merged: readonly MergedRegion[]): string {
 		.join(", ");
 }
 
+/** File identity captured when a read was tracked. */
+export interface FileSnapshot {
+	mtimeMs: number;
+	size: number;
+}
+
+/** A finalized tool result, as pi delivers it on the `tool_result` event. */
+export interface ToolResultLike {
+	toolName: string;
+	isError: boolean;
+	input: Record<string, unknown>;
+}
+
+/** 1-based start line, matching the read tool: absent or < 1 means line 1. */
+function startLine(value: unknown): number {
+	return typeof value === "number" && Number.isFinite(value) && value >= 1 ? Math.floor(value) : 1;
+}
+
+/** Requested line count, matching the read tool: absent means "to end of file". */
+function lineCount(value: unknown): number {
+	return typeof value === "number" && Number.isFinite(value)
+		? Math.floor(value)
+		: Number.MAX_SAFE_INTEGER;
+}
+
+/**
+ * Windows whose read-time identity still matches `snapshot` (size and mtime).
+ * A window recorded without a stat can never be proven fresh, so it is dropped:
+ * naming the file for a re-read beats serving a stale line range.
+ */
+export function selectFreshRegions(
+	regions: readonly ReadRegion[],
+	snapshot: FileSnapshot,
+): ReadRegion[] {
+	return regions.filter((r) => r.size === snapshot.size && r.mtimeMs === snapshot.mtimeMs);
+}
+
 /** Per-file read windows, keyed by {@link normalizePath}. */
 export class ReadTracker {
 	private readonly files = new Map<string, ReadRegion[]>();
@@ -117,6 +160,17 @@ export class ReadTracker {
 		this.files.set(key, regions);
 	}
 
+	/** Track a read from a finalized `tool_result` event. */
+	async recordToolResult(event: ToolResultLike, cwd: string): Promise<void> {
+		if (event.toolName !== "read" || event.isError) return;
+		const filePath = event.input?.path;
+		if (typeof filePath !== "string" || filePath.length === 0) return;
+		await this.recordRead(filePath, cwd, {
+			offset: startLine(event.input.offset),
+			limit: lineCount(event.input.limit),
+		});
+	}
+
 	/** Windows tracked for `filePath`, or undefined when it was never read. */
 	regionsFor(filePath: string, cwd: string): ReadRegion[] | undefined {
 		return this.files.get(normalizePath(filePath, cwd));
@@ -137,6 +191,9 @@ export class ReadTracker {
  * Collect the paths of files whose `read` tool calls survive the compaction
  * boundary (`firstKeptEntryId` and later) — those files are still in the
  * model's context, so re-injecting them would duplicate content.
+ *
+ * Pass the compacting branch's entries: off-branch reads are not in context, so
+ * counting them would skip a file the model can no longer see.
  */
 export function collectPreservedReadPaths(
 	entries: ReadonlyArray<{ id: string; type: string; message?: any }>,
@@ -150,8 +207,8 @@ export function collectPreservedReadPaths(
 		if (!found) continue;
 		if (entry.type !== "message" || entry.message?.role !== "assistant") continue;
 		for (const block of entry.message.content ?? []) {
-			if (block?.type !== "tool_use" || block.name !== "read") continue;
-			const rawPath = block.input?.path;
+			if (block?.type !== "toolCall" || block.name !== "read") continue;
+			const rawPath = block.arguments?.path;
 			if (typeof rawPath !== "string") continue;
 			paths.add(normalizePath(rawPath, cwd));
 		}

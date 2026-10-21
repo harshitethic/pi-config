@@ -10,6 +10,7 @@ import {
 	formatRanges,
 	mergeRegions,
 	normalizePath,
+	selectFreshRegions,
 } from "./lib/read-tracking.ts";
 
 const CHECKPOINT_DIR = ".pi/checkpoints";
@@ -69,12 +70,21 @@ function estimateTokens(content: string): number {
 }
 
 /**
+ * One line saying what the injected block is: content re-read from disk at
+ * checkpoint time, line ranges picked from an earlier read.
+ */
+const SNAPSHOT_LABEL =
+	"[Disk snapshot taken at checkpoint time — line ranges were selected from an earlier read, so line numbers may have shifted.]";
+
+/**
  * Read file contents for each entry in `relevantPaths`, skipping files that
  * are already preserved in the compacted context.
  *
  * Only the lines actually read this session are injected — if the whole file
  * was read the whole file goes through.  Files with no tracked read regions
- * are skipped entirely.
+ * are skipped entirely.  Windows whose file changed since the read are never
+ * served: their line numbers described an older version, so the file is named
+ * for a re-read instead.
  */
 async function buildFileInjection(
 	relevantPaths: RelevantPathEntry[],
@@ -88,6 +98,7 @@ async function buildFileInjection(
 	const parts: string[] = [];
 	const omitted: string[] = [];
 	const skippedPreserved: string[] = [];
+	const changed: string[] = [];
 	let used = 0;
 
 	for (const entry of relevantPaths) {
@@ -100,18 +111,30 @@ async function buildFileInjection(
 			continue;
 		}
 
+		// No read regions tracked → nothing to inject, skip entirely.
+		const regions = reads.regionsFor(entry.path, cwd);
+		if (!regions || regions.length === 0) continue;
+
 		// -- Read and format file content (matching read-tool output format) -
 		const absolutePath = resolvePath(cwd, entry.path);
 		let content: string;
 
 		try {
-			const raw = await readFile(absolutePath, "utf-8");
-			const regions = reads.regionsFor(key, cwd);
+			const [raw, snapshot] = await Promise.all([
+				readFile(absolutePath, "utf-8"),
+				stat(absolutePath),
+			]);
 
-			// No read regions tracked → nothing to inject, skip entirely.
-			if (!regions || regions.length === 0) continue;
+			// A window read from another version of the file describes line
+			// numbers that no longer hold, so it is dropped rather than served.
+			const fresh = selectFreshRegions(regions, snapshot);
+			if (fresh.length === 0) {
+				changed.push(entry.path);
+				continue;
+			}
+			if (fresh.length < regions.length) changed.push(entry.path);
 
-			const merged = mergeRegions(regions);
+			const merged = mergeRegions(fresh);
 			const rawLines = raw.split("\n");
 			const totalLines = rawLines.length;
 			// Single region covering the whole file → no continuation hints.
@@ -144,13 +167,12 @@ async function buildFileInjection(
 		used += blockTokens;
 	}
 
-	let text = parts.join("\n\n");
+	let text = parts.length > 0 ? `${SNAPSHOT_LABEL}\n${parts.join("\n\n")}` : "";
 
 	const notes: string[] = [];
 	if (skippedPreserved.length > 0) {
 		notes.push(
-			`${skippedPreserved.length} file(s) already in preserved context — skipped: ${skippedPreserved.join(", ")}. ` +
-			``,
+			`${skippedPreserved.length} file(s) already in preserved context — skipped: ${skippedPreserved.join(", ")}. `,
 		);
 	}
 	if (omitted.length > 0) {
@@ -158,6 +180,11 @@ async function buildFileInjection(
 			`${parts.length} of ${relevantPaths.length} files included ` +
 			`(budget: ${budget.toLocaleString()} tokens, ~${Math.round(INJECTION_BUDGET_FRACTION * 100)}% of context window). ` +
 			`Omitted: ${omitted.join(", ")}. Use read tool if needed.`,
+		);
+	}
+	if (changed.length > 0) {
+		notes.push(
+			`${changed.length} file(s) changed since read — re-read if needed: ${changed.join(", ")}. `,
 		);
 	}
 	if (notes.length > 0) {
@@ -231,13 +258,10 @@ export default function (pi: ExtensionAPI) {
 		compactRequested = false;
 	});
 
-	pi.on("tool_execution_end", async (event, ctx) => {
-		if (event.toolName !== "read" || event.isError) return;
-		const path: string | undefined = event.args?.path;
-		if (!path) return;
-		const offset: number = event.args?.offset ?? 1;
-		const limit: number = event.args?.limit ?? Number.MAX_SAFE_INTEGER;
-		await reads.recordRead(path, ctx.cwd, { offset, limit });
+	// Finalized read args arrive here, on `input`. `tool_execution_end` carries
+	// no args at all, so tracking from it recorded nothing (WO-2026-055).
+	pi.on("tool_result", async (event, ctx) => {
+		await reads.recordToolResult(event, ctx.cwd);
 	});
 
 	// -- Compaction trigger ----------------------------------------------
@@ -292,8 +316,12 @@ export default function (pi: ExtensionAPI) {
 
 			// Read and inject files now that we know the preservation boundary.
 			if (pendingCheckpoint) {
+				// Scope the scan to the entries being compacted: `getEntries()` also
+				// holds off-branch reads, which are not in the model's context and
+				// would wrongly suppress injection.
+				const entries = event.branchEntries ?? ctx.sessionManager.getEntries();
 				const preserved = collectPreservedReadPaths(
-					ctx.sessionManager.getEntries(),
+					entries,
 					preparation.firstKeptEntryId,
 					ctx.cwd,
 				);
