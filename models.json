@@ -21,6 +21,16 @@
               "allow_fallbacks": false
             }
           }
+        },
+        "xiaomi/mimo-v2.6-pro": {
+          "compat": {
+            "openRouterRouting": {
+              "order": [
+                "xiaomi"
+              ],
+              "allow_fallbacks": true
+            }
+          }
         }
       }
     }
