@@ -5,7 +5,7 @@
 - **9833b88** `docs/investigations/model-seat-economics-2026-10.md` — CHR **96.8%** working number (owner 2026-10-22); cache-read rate dominates cost at that CHR.
 - **28f10c2** seat-doc corrections (audit items 1–5 + warm-up note).
 - **2bbcae3** rulings (two commits: refactor `1f960ea` + change `4b91aea`): fleet fallback returns `FLEET_MODEL_SPEC` provider-qualified join (`extensions/lib/fleet-model.ts`, consumers: compaction + 3 fallback arms); bug-triage unpinned by rule (`decisions/bug-triage/001` note); main sessions owner-managed (036/038 dated notes) — owner switches manually, currently `openrouter/xiaomi/mimo-v2.6-pro`.
-- **pending** decision `subagents/042` — Go coupon-fill strategy (fleet = DeepSeek on Go only, target ~100% of prepaid allotment, DS overflow past coupon → `openrouter/deepseek/deepseek-v4.1-flash-1017`, never Zen) + `models.json` `xiaomi/mimo-v2.6-pro` → `order:["xiaomi"]` preference pin. Implementer in flight 2026-10-22.
+- **37eb07b** decision `subagents/042` — Go coupon-fill strategy (fleet = DeepSeek on Go only, target ~100% of prepaid allotment, DS overflow past coupon → `openrouter/deepseek/deepseek-v4.1-flash-1017`, never Zen) + `models.json` `xiaomi/mimo-v2.6-pro` → `order:["xiaomi"]`, `allow_fallbacks:true` preference pin (5 endpoints, none fp4). Basis note: the record's ~$230/mo fleet extrapolation is the 2026-10-22 console figure; the raw row ($27.15 / ~4.4 d) extrapolates ≈$185/mo — pin the basis before quoting either.
 
 ---
 

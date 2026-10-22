@@ -48,3 +48,4 @@ date: 2026-07-14
 | 039 | Gates run the suite once (supersedes the ×2 convention) | done |
 | 040 | Refactor first: a preparatory refactor per work order, `REFACTOR FIRST` refusals, two-strikes area closure (owner only overrides) | done |
 | 041 | Review seats → `openrouter/z-ai/glm-5.3-flash:high` (off OpenCode Go extra-usage billing; model unchanged) | done |
+| 042 | OpenCode Go is a coupon: fill it with DeepSeek fleet traffic only; `xiaomi/mimo-v2.6-pro` routing preference pin | done |
