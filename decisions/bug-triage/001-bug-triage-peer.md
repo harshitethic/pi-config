@@ -134,6 +134,11 @@ work-order.
   coordinated across reporters. Two sessions on the same name collide
   on one mailbox identity.
 
+> **Model seat (2026-10-22, owner):** bug-triage stays unpinned by rule — it is a
+> long-running session (`pi --name bug-triage`), not a subagent, and runs on the
+> `settings.json` session defaults by design: its model follows the main-session
+> defaults and manual `/model` switching, deliberately not pinned to a fleet seat.
+
 ## Files changed
 
 - `agents/bug-triage.md` — the role prompt.

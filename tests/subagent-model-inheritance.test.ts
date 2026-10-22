@@ -32,7 +32,6 @@ import subagentFactory, {
 	readMetaJson,
 	resolveChildModel,
 } from "../extensions/subagent-async/index.ts";
-import { FLEET_MODEL } from "../extensions/lib/fleet-model.ts";
 import { childEnv, scrubSubagentEnv } from "./helpers/subagent-env.ts";
 
 // What agents/orchestrator.md pins (the seat's own audited level, decision 022).
@@ -105,7 +104,7 @@ describe("resolveChildModel — the orchestrator seat tracks its caller", () => 
 		).toBe(ORCHESTRATOR_SEAT);
 		expect(
 			resolveChildModel({ agentName: "orchestrator", agentModel: undefined, parentModel: undefined }),
-		).toBe(FLEET_MODEL);
+		).toBe("opencode-go/deepseek-v4.1-flash");
 	});
 });
 
@@ -141,7 +140,7 @@ describe("resolveChildModel — every other seat keeps the existing rule", () =>
 
 	it("falls back to the fleet model when the seat pins no model (decision 022)", () => {
 		expect(resolveChildModel({ agentName: "scout-code", agentModel: undefined, parentModel: OTHER_CALLER })).toBe(
-			FLEET_MODEL,
+			"opencode-go/deepseek-v4.1-flash",
 		);
 	});
 
@@ -160,7 +159,9 @@ describe("resolveChildModel — every other seat keeps the existing rule", () =>
 	});
 
 	it("falls back to the fleet model on resume when an old meta recorded none", () => {
-		expect(resolveChildModel({ agentName: "implement", agentModel: undefined, isResume: true })).toBe(FLEET_MODEL);
+		expect(resolveChildModel({ agentName: "implement", agentModel: undefined, isResume: true })).toBe(
+			"opencode-go/deepseek-v4.1-flash",
+		);
 	});
 });
 

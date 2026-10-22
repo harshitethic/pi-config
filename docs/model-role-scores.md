@@ -185,7 +185,7 @@ solo-throughput columns below are per-model illustrations of that allowance.
 
 | Slot | Agent file | Model | Effort | Verdict |
 |---|---|---|---|---|
-| Main session | `settings.json` | opencode-go/glm-5.3-flash | `defaultThinkingLevel` — `high` | ✓ user-flipped 2026-10-18 (OpenCode Go plan; orchestrators inherit per 031) |
+| Main session | `settings.json` | owner-managed (manual `/model`); `settings.json` `defaultModel` is the initial value | owner-managed the same way; `defaultThinkingLevel` is the initial level | ✓ owner-managed since 2026-10-22 — no fixed assignment; orchestrators inherit whatever the session runs (031) |
 | Orchestrator-subagent | `agents/orchestrator.md` | caller's model + `:max` (031; frontmatter donor `opencode-go/deepseek-v4.1-flash`) | max | ✓ moved 2026-10-01 (decision 022) |
 | Implementer | `agents/implement.md` | opencode-go/deepseek-v4.1-flash | high | ✓ moved 2026-10-01 (decision 022) |
 | Oracle | `agents/math-algo-oracle.md` | opencode-go/deepseek-v4-pro | max | ✓ 037, 2026-10-18: the only solid math/algo row on the Go menu (LCB 93.5/IMO 89.8); low volume fits its $15 bucket | ✓ moved 2026-10-01 (decision 022; beats 0813 on CF/Apex/DeepSWE/TB2.1) |

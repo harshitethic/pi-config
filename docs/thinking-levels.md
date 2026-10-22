@@ -171,9 +171,9 @@ seat split 037/041)
    no-caller-model fallback only**, not an assignment — the `INHERITING_AGENT` branch
    in `extensions/subagent-async/index.ts` wins at spawn. 021's max-for-the-hard-tail
    call carries over: the seat owns planning/instructions.
-5. **Main session — whatever `settings.json` says**
-   (`defaultProvider`/`defaultModel`/`defaultThinkingLevel`; owner-flipped, 038). It is
-   the caller whose model the orchestrator inherits, not a fleet constant.
+5. **Main session — owner-managed** (manual `/model` per session; `settings.json`'s
+   `defaultModel`/`defaultThinkingLevel` are only the initial value, 038). It is the caller
+   whose model the orchestrator inherits, not a fleet constant.
 6. **MiMo V2.5 Pro — nothing to set** (no effort control).
 7. **If GPT-5.6 Luna ever enters the fleet, run it at `high`** — the only
    fully-quantified sweet spot (90% quality / 42% tokens / 43% cost).
