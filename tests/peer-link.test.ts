@@ -1,3 +1,10 @@
+// LIVE-NETWORK: this file makes real billed LLM calls on every full `bun test` run.
+// Provider/model: openrouter/deepseek/deepseek-v4-flash (OpenRouter canonical `-20260423`),
+// authorized from the live `~/.pi/agent/auth.json`.
+// Invisible to session-log attribution: the peer-link fixture runs the session via
+// `SessionManager.inMemory`, so no transcript is persisted (~1 live prompt per run).
+// See docs/investigations/or-workspace-attribution-2026-10.md.
+
 /**
  * Tests for the peer-link extension: mailbox mechanics (unit) plus
  * integration with real agent sessions (SDK).
