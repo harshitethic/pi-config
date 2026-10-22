@@ -11,6 +11,16 @@
               "allow_fallbacks": false
             }
           }
+        },
+        "z-ai/glm-5.3-flash": {
+          "compat": {
+            "openRouterRouting": {
+              "only": [
+                "z-ai"
+              ],
+              "allow_fallbacks": false
+            }
+          }
         }
       }
     }
