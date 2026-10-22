@@ -17,6 +17,7 @@ import {
 	type CheckpointTokens,
 	type GitBinding,
 } from "./lib/checkpoint-meta.ts";
+import { validateNextStepsOwnerState } from "./lib/owner-row.ts";
 import {
 	ReadTracker,
 	collectPreservedReadPaths,
@@ -25,6 +26,7 @@ import {
 	normalizePath,
 	selectFreshRegions,
 } from "./lib/read-tracking.ts";
+import { listInFlightSubagents, type InFlightSubagent } from "./lib/subagent-state.ts";
 
 const CHECKPOINT_DIR = ".pi/checkpoints";
 const MARKER = "[CHECKPOINT]";
@@ -130,7 +132,7 @@ interface ArchiveMetaExtras {
 
 /** State passed from checkpoint tool → compaction hook → onComplete callback. */
 interface PendingCheckpoint {
-	/** `renderSummary` output — the text the fresh window receives verbatim. */
+	/** `composeSummary` output — the text the fresh window receives verbatim. */
 	summary: string;
 	next: string;
 	doContinue: boolean;
@@ -158,6 +160,55 @@ let pendingCheckpoint: PendingCheckpoint | null = null;
  * call in the same turn replaces the data but only one compaction fires.
  */
 let compactRequested = false;
+
+// ---------------------------------------------------------------------------
+// In-flight subagent record (R3-1)
+// ---------------------------------------------------------------------------
+
+/**
+ * The machine-built "In-flight subagents" section appended to every archived
+ * summary. Sourced read-only from the subagent meta registry (tfd
+ * process-controls R3, owner 2026-10-19) — never from the model's summary, so
+ * work in flight cannot be lost by an omission in the prose. Empty registry
+ * (or no running/orphaned child) means no section.
+ */
+export function formatInFlightSection(entries: InFlightSubagent[]): string {
+	if (entries.length === 0) return "";
+	const lines = ["### In-flight subagents", "_Recorded by the checkpoint tool from the subagent meta registry._"];
+	for (const e of entries) {
+		const agent = e.agentName ? ` (${e.agentName})` : "";
+		const branch = e.branch ? `branch \`${e.branch}\`` : "no worktree branch";
+		lines.push(`- \`${e.sid}\`${agent} — ${branch} — state: ${e.state} (${e.evidence})`);
+		if (e.resumeCall) lines.push(`  - resumable: \`${e.resumeCall}\``);
+	}
+	return lines.join("\n");
+}
+
+/** The stored summary: the model's three-part summary plus the machine section. */
+function composeSummary(summary: string, section: string): string {
+	return section ? `${summary}\n\n${section}` : summary;
+}
+
+/**
+ * R6 (tfd process-controls, owner 2026-10-19): `nextSteps` states owner state
+ * only by registry row id. Returns the tool-error result for a violating claim,
+ * or null when the field passes (form, plus registry existence when the cwd
+ * repo carries `scripts/reviews_status.py`).
+ */
+function rejectOwnerStateProse(nextSteps: string, cwd: string) {
+	const verdict = validateNextStepsOwnerState(nextSteps, cwd);
+	if (verdict.ok) return null;
+	return {
+		content: [{ type: "text" as const, text: `Error: ${verdict.error}` }],
+		isError: true,
+	};
+}
+
+/** Test hook: scan this directory for the meta registry instead of /tmp. */
+let inflightScanDirOverride: string | undefined;
+export function _testSetInflightScanDir(dir: string | undefined): void {
+	inflightScanDirOverride = dir;
+}
 
 // ---------------------------------------------------------------------------
 // File injection
@@ -533,17 +584,25 @@ export default function (pi: ExtensionAPI) {
 			),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			const prose = rejectOwnerStateProse(params.nextSteps ?? "", ctx.cwd);
+			if (prose) return prose;
+
 			const next = params.nextSteps ?? "Continue work";
 			const doContinue = params.continue !== false;
 			const relevantPaths: RelevantPathEntry[] = params.relevantPaths ?? [];
 			const contextWindow = ctx.model?.contextWindow ?? 200_000;
 			const summaryFields: SummaryFields = params.summary;
-			const summary = renderSummary(summaryFields, next);
 
 			// Captured before anything is written, so the archive's own untracked
 			// files cannot show up in `git.dirty`.
 			const git = await captureGitBinding(ctx.cwd);
 			const tokens: CheckpointTokens = { before: tokensBefore(ctx), after: null };
+
+			// R3-1: one composed summary serves both the archive and the restore
+			// path, so the in-flight record is in the context after compaction.
+			const inFlight = listInFlightSubagents({ dir: inflightScanDirOverride });
+			const section = formatInFlightSection(inFlight);
+			const summary = composeSummary(renderSummary(summaryFields, next), section);
 
 			// Archive *before* compaction so all entries are captured in full.
 			let archivePath: string | undefined;
@@ -579,6 +638,12 @@ export default function (pi: ExtensionAPI) {
 			compactRequested = true;
 
 			const responseLines = [`Checkpoint queued.`];
+			if (inFlight.length > 0) {
+				responseLines.push(
+					`In-flight subagents recorded in the summary: ${inFlight.length} ` +
+						`(${inFlight.map((e) => `${e.sid.slice(-8)} ${e.state}`).join(", ")}).`,
+				);
+			}
 			if (archivePath) {
 				responseLines.push(`Full session archived to:\n\`${archivePath}\``);
 				responseLines.push(`Grep there with: \`rg PATTERN ${archivePath}\``);
@@ -638,6 +703,9 @@ export default function (pi: ExtensionAPI) {
 			),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			const prose = rejectOwnerStateProse(params.nextSteps ?? "", ctx.cwd);
+			if (prose) return prose;
+
 			let targetStat;
 			try {
 				targetStat = await stat(params.newCwd);
@@ -661,12 +729,17 @@ export default function (pi: ExtensionAPI) {
 			const oldCwd = ctx.sessionManager.getCwd();
 			const contextWindow = ctx.model?.contextWindow ?? 200_000;
 			const summaryFields: SummaryFields = params.summary;
-			const summary = renderSummary(summaryFields, next);
 
 			// The source tree's ref, captured when the fork is authored (the archive
 			// itself is written at /go, after this): the summary describes this state.
 			const git = await captureGitBinding(oldCwd);
 			const tokens: CheckpointTokens = { before: tokensBefore(ctx), after: null };
+
+			// R3-1: both the fork-source archive and the new session's summary
+			// carry the in-flight record.
+			const inFlight = listInFlightSubagents({ dir: inflightScanDirOverride });
+			const section = formatInFlightSection(inFlight);
+			const summary = composeSummary(renderSummary(summaryFields, next), section);
 
 			// Fork creates a new session — no preservation to dedup against.
 			const injection = await buildFileInjection(
@@ -729,6 +802,9 @@ export default function (pi: ExtensionAPI) {
 			ctx.ui.notify(`Fork prepared → ${params.newCwd}. Run /go to switch.`, "info");
 
 			const responseLines = [`Fork prepared → ${params.newCwd}. Run /go to switch.`];
+			if (inFlight.length > 0) {
+				responseLines.push(`In-flight subagents recorded in the summary: ${inFlight.length}.`);
+			}
 			if (relevantPaths.length > 0) {
 				const notes: string[] = [];
 				notes.push(
