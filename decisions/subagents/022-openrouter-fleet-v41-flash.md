@@ -54,3 +54,8 @@ Per-seat conclusions: implementer/reviewers `:high` = the vendor's everyday-agen
 > **Addendum (2026-10-18, [decision 035](035-flash-1017-refresh.md)):** the fleet model id moved to
 > the Oct 17 checkpoint, `deepseek/deepseek-v4.1-flash-1017` — same seat split, same effort levels,
 > same routing pin shape; the 0910 id above is the id this decision adopted.
+
+> **Addendum (2026-10-22, [decision 041](041-glm-review-seats-openrouter.md)):** the “no z.ai
+> subscription” bound in Why item 1 describes the z.ai-subscription era only. `z-ai/glm-5.3-flash`
+> runs on OpenRouter pay-per-token and serves the three review seats from 2026-10-22 (041); the
+> DeepSeek seats' OpenRouter routing this decision chose is itself superseded by 036.

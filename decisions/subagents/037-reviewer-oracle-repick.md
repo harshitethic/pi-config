@@ -61,3 +61,10 @@ decisions index, supersession footnote on 023, this decision.
 pins unaffected — reviewer seats aren't resolver inputs; run confirms no drift), plus
 the next gated implementation records reviewer spawns on `opencode-go/glm-5.3-flash:*`
 in their `meta.json`.
+
+---
+
+> **Addendum (2026-10-22, [decision 041](041-glm-review-seats-openrouter.md)):** item 1's provider is
+> superseded — the three review seats now run `openrouter/z-ai/glm-5.3-flash:high` (off OpenCode Go
+> extra-usage billing). The model, the `:high` level, the 037 rationale and the Zhipu-vs-DeepSeek
+> decorrelation are unchanged; item 2 (oracle) stands.

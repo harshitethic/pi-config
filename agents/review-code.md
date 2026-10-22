@@ -2,7 +2,7 @@
 name: review-code
 description: Post-implementation adversarial implementation-correctness reviewer. Owns spec compliance, invariants, structural risks, error/recovery semantics, build & test execution, unrequested-changes audit, and build-config integrity. Does NOT do exhaustive test-coverage auditing — that's `review-tests`'s job. NOT for plan review (`review-plan`), implementation (`implement`), or research (`scout-code`).
 tools: read, grep, find, ls, bash
-model: opencode-go/glm-5.3-flash:high
+model: openrouter/z-ai/glm-5.3-flash:high
 reviewer_kind: implementation
 requires_parent_reviewers:
 ---

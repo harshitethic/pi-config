@@ -184,7 +184,7 @@ solo-throughput columns below are per-model illustrations of that allowance.
 | Orchestrator-subagent | `agents/orchestrator.md` | caller's model + `:max` (031; frontmatter donor `opencode-go/deepseek-v4.1-flash`) | max | ✓ moved 2026-10-01 (decision 022) |
 | Implementer | `agents/implement.md` | opencode-go/deepseek-v4.1-flash | high | ✓ moved 2026-10-01 (decision 022) |
 | Oracle | `agents/math-algo-oracle.md` | opencode-go/deepseek-v4-pro | max | ✓ 037, 2026-10-18: the only solid math/algo row on the Go menu (LCB 93.5/IMO 89.8); low volume fits its $15 bucket | ✓ moved 2026-10-01 (decision 022; beats 0813 on CF/Apex/DeepSWE/TB2.1) |
-| Review standard ×3 | `agents/review-{code,plan,tests}.md` | opencode-go/glm-5.3-flash | high | ✓ migrated 2026-10-18 (037) — Zhipu lab, decorrelated from the DeepSeek implementer; supersedes 023's Xiaomi tier |
+| Review standard ×3 | `agents/review-{code,plan,tests}.md` | openrouter/z-ai/glm-5.3-flash | high | ✓ provider moved 2026-10-22 (041) — off OpenCode Go extra-usage billing, same model | ✓ migrated 2026-10-18 (037) — Zhipu lab, decorrelated from the DeepSeek implementer; supersedes 023's Xiaomi tier |
 | Scouts ×2 | `agents/scout-{code,web}.md` | opencode-go/deepseek-v4.1-flash | low | ✓ moved 2026-10-01 (decision 022; `:medium` was a silent clamp to high, replaced with the real discount tier for read-only research) |
 | Compaction | `extensions/compaction-model.ts` | opencode-go/deepseek-v4.1-flash | low | ✓ moved 2026-10-01 (decision 022; constant target, explicit `:low` — without a level it rode the provider default `high`) |
 

@@ -1,7 +1,7 @@
 ---
 name: review-tests
 description: Post-implementation adversarial test-coverage reviewer. Owns behavioral, failure, boundary, regression, and recovery-path test-coverage matrix adequacy. Does NOT review implementation correctness — that's `review-code`'s job. NOT for plan review (`review-plan`), implementation (`implement`), or research (`scout-code`).
-model: opencode-go/glm-5.3-flash:high
+model: openrouter/z-ai/glm-5.3-flash:high
 reviewer_kind: tests
 requires_parent_reviewers:
 tools: read, grep, find, ls, bash
