@@ -47,3 +47,4 @@ date: 2026-07-14
 | 038 | Main session → `opencode-go/glm-5.3-flash` (meter-driven); multi-session orchestrator split | done |
 | 039 | Gates run the suite once (supersedes the ×2 convention) | done |
 | 040 | Refactor first: a preparatory refactor per work order, `REFACTOR FIRST` refusals, two-strikes area closure (owner only overrides) | done |
+| 041 | Review seats → `openrouter/z-ai/glm-5.3-flash:high` (off OpenCode Go extra-usage billing; model unchanged) | done |
