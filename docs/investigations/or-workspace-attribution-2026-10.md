@@ -21,6 +21,23 @@ Local pi session logs (`~/.pi/agent/sessions/**` assistant `provider`/`model`) m
 
 Most likely: **another machine sharing the `pi-openrouter` key** (`~/.ssh/known_hosts` has `192.168.1.120`, `[192.168.1.122]:2222`) or `--no-session`/benchmark runs. Inference from exhaustion, not observed. Settling evidence: the other box's `~/.pi/agent/sessions` for 10-19/20/21 — or per-machine keys so `/activity?api_key_hash=…` answers it directly.
 
+> **Superseded 2026-10-22 (later trace, scout-code on the owner's hypothesis):** it is our own
+> **test suite**, not a machine. Live-network tests bill real calls and are structurally invisible
+> to session logs: `tests/e2e-checkpoint.test.ts:233,240` + `tests/peer-link.test.ts:447-474` run
+> real SDK sessions on `deepseek/deepseek-v4-flash` (0423) with `auth.json` credentials through
+> `SessionManager.inMemory` (never persisted), ~20–30 0423 requests per full `bun test` run
+> (in-test compaction rides the same model — the `compaction-model.ts` extension is not loaded in
+> that harness); `tests/subagent-model-inheritance.test.ts:173-236` spawns the real `pi` binary
+> with a one-turn "Reply with the single word: ok" task on an unpinned `openrouter/xiaomi/mimo-v2.6-flash`
+> orchestrator seat (~13.9k fixed system prompt / ~12 out — exactly the ledger's uniform row), and
+> `afterEach` deletes the child transcript. 2,297 calls on 10-21 ≈ ~100 suite runs on the heavy
+> load-flake debugging day. The "stale defaults in tests" label above was wrong: two of those tests
+> run the slug against the network on every full suite run. Residual uncertainty: the mimo rows may
+> also include an external probe (`~/Developer/tfd-bench/benchmark.py`; `docs/thinking-levels.md`
+> documents a manual two-request caching probe) — an `/activity` diff around one `bun test
+> tests/subagent-model-inheritance.test.ts` run settles it. Attribution lesson: test-spawned LLM
+> calls need labelling; transcript cleanup + in-memory sessions defeat session-log forensics.
+
 ## Notes
 
 - `~/Developer/pi-config-triage/settings.json` still has pre-036 `defaultProvider: openrouter` / `deepseek/deepseek-v4.1-flash` — a stale checkout that bills OpenRouter if run without `/model`.
