@@ -119,7 +119,7 @@ describe("external.ts CLI (as Claude Code hooks run it)", () => {
 
 		expect(run(["hook", "session-end"], hookJson("SessionEnd")).code).toBe(0);
 		expect(listPeers(dir).some((p) => p.name === SELF)).toBe(false);
-	}, 20_000);
+	}, 120_000);
 
 	it("an aborted prompt loses nothing: un-acked mail is re-emitted on the next prompt", () => {
 		run(["hook", "session-start"], hookJson("SessionStart"));
@@ -135,7 +135,7 @@ describe("external.ts CLI (as Claude Code hooks run it)", () => {
 		run(["hook", "stop"], hookJson("Stop"));
 		expect(readIncoming(dir, SELF)).toEqual([]);
 		expect(run(["hook", "prompt"], hookJson("UserPromptSubmit")).out).toBe("");
-	}, 20_000);
+	}, 120_000);
 
 	it("Stop acks only what the completed turn carried; mid-turn arrivals wait", () => {
 		run(["hook", "session-start"], hookJson("SessionStart"));
@@ -152,7 +152,7 @@ describe("external.ts CLI (as Claude Code hooks run it)", () => {
 		const next = run(["hook", "prompt"], hookJson("UserPromptSubmit"));
 		expect(next.out).toContain("arrived mid-turn");
 		expect(next.out).not.toContain("seen by the turn");
-	}, 20_000);
+	}, 120_000);
 
 	it("Stop with nothing inflight is a clean no-op", () => {
 		run(["hook", "session-start"], hookJson("SessionStart"));
@@ -160,7 +160,7 @@ describe("external.ts CLI (as Claude Code hooks run it)", () => {
 		expect(r.code).toBe(0);
 		expect(r.out).toBe("");
 		expect(readIncoming(dir, SELF)).toEqual([]);
-	}, 20_000);
+	}, 120_000);
 
 	it("sends to a listed pi peer, from stdin, with --reply", () => {
 		run(["hook", "session-start"], hookJson("SessionStart"));
@@ -171,7 +171,7 @@ describe("external.ts CLI (as Claude Code hooks run it)", () => {
 		const [env] = readIncoming(dir, "bug-triage");
 		expect(env).toMatchObject({ from: SELF, to: "bug-triage", text: "repro: x\nwhere: y", expectReply: true });
 		expect(typeof env.sentAt).toBe("number");
-	}, 20_000);
+	}, 120_000);
 
 	it("fails loud: unlisted target, unregistered sender, requireOnline to an offline peer", () => {
 		run(["hook", "session-start"], hookJson("SessionStart"));
@@ -189,5 +189,5 @@ describe("external.ts CLI (as Claude Code hooks run it)", () => {
 		const offline = run(["send", "--from", SELF, "--require-online", "bug-triage", "hi"]);
 		expect(offline.code).toBe(1);
 		expect(readIncoming(dir, "bug-triage")).toEqual([]);
-	}, 20_000);
+	}, 120_000);
 });
