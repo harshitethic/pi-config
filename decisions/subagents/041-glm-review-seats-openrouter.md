@@ -55,6 +55,8 @@ not on either figure.**
   There is no first-party-weight-fidelity argument here as there was for the DeepSeek `-1017`
   pin (022), and `allow_fallbacks: false` would make a single upstream hiccup a loud fleet-wide
   reviewer outage.
+  → **Corrected 2026-10-22: the pin is the ruling.** See the amendment at the end; the bullet is
+  kept as the record of what was argued.
 - **Return to a z.ai subscription** — impossible: none exists (022).
 - **Swap the model while we are here** (a cheaper or stronger reviewer) — out of scope: the
   owner ruled on a provider move for the same model, and reviewer quality is a separate
@@ -69,7 +71,8 @@ not on either figure.**
 - **Prompt caching is upstream-chosen.** The slug is served by multiple endpoints; 022's
   2026-10-01 probe found provider-automatic prefix caching works broadly across OpenRouter
   endpoints, but the cache-read share of a reviewer bill is not ours to set without a pin, which
-  this decision declines to add.
+  this decision declines to add. → **Superseded 2026-10-22: the pin sets it** ($0.03/M cache-read);
+  see the amendment.
 - **Two providers in one review round.** Reviewers on OpenRouter and implementers on Go means a
   provider-wide outage breaks only half the round, but a review with two independent gates is
   also exposed to two independent failure modes. No mitigation beyond the loud-failure stance.
@@ -90,7 +93,8 @@ not on either figure.**
 ## Rollback
 
 One commit, three frontmatter lines: `opencode-go/glm-5.3-flash:high` restores the previous
-provider. No state file, no toggle, no `models.json` change.
+provider. No state file, no toggle, no `models.json` change. → **As amended 2026-10-22: the
+rollback also drops the `z-ai/glm-5.3-flash` override from `models.json`.**
 
 **Files changed:** `agents/review-{code,plan,tests}.md` (model lines), `README.md` (agent
 roster), `docs/model-role-scores.md` (assignment-table row), `decisions/subagents/README.md`
@@ -104,3 +108,55 @@ records `openrouter/z-ai/glm-5.3-flash:*` spawns in its reviewers' `meta.json`.
 **Numbering note:** the dispatch cited this record as `038`, which is landed history
 (`038-main-session-glm-flash-split.md`). Per `rules/work-order-numbering.md` clause 3 a landed
 number keeps its id, so the losing claim renumbers to the next free id — 041.
+
+---
+
+> **Amendment (2026-10-22): the seat is routed-pinned. The "unpinned acceptance stands" line
+> above is corrected — nothing else in this record changes.**
+>
+> `models.json` gains a `z-ai/glm-5.3-flash` override in 022's shape: `only: ["z-ai"]`,
+> `allow_fallbacks: false`. The rejection bullet is wrong twice, and the corrections are
+> independent:
+>
+> 1. **Chronology.** 020 is dated 2026-08-28; 022 is dated 2026-10-01. A 2026-08-28 acceptance
+>    cannot license a route that a later, fleet-wide decision's rejected alternative forbids:
+>    *"Run the fleet unpinned (cheapest OpenRouter routing) — rejected: cheapest endpoints are
+>    fp4-quantized, so the vendor-card measurements no longer describe what runs."* 022 governs
+>    every OpenRouter route in this config, not only the DeepSeek slug it was written for.
+> 2. **Category error.** 020 never routed this model through OpenRouter. It ran
+>    `zai/glm-5.3-flash` on the z.ai subscription's own endpoint (020, *What*), so there was no
+>    OpenRouter routing decision to accept — the earlier draft inferred an acceptance from a
+>    route that never existed.
+>
+> **Endpoint evidence** (`GET https://openrouter.ai/api/v1/models/z-ai/glm-5.3-flash/endpoints`
+> and `/api/v1/providers`, 2026-10-22). The slug is served by **34 endpoints**. Quantization:
+> fp8 ×11, fp4 ×9, unknown ×10, nvfp4 ×4. Price-sorted head: OpenInference `open-inference/fp4`
+> **$0.0113 / $0.1589** (fp4), Relace `relace` **$0.0113 / $0.1707** (unknown), StreamLake
+> `streamlake/fp8` $0.0435 / $0.145. OpenRouter's price-first default therefore starts on
+> fp4/unknown renditions — exactly 022's fidelity failure. Pinned instead: **provider slug
+> `z-ai`**, name "Z.AI", HQ SG, tag `z-ai/fp8`, quantization fp8, **$0.15 / $0.50 / $0.03** per M
+> prompt / completion / cache-read, 1,048,576 ctx, `max_completion_tokens` 131,072, 100% uptime
+> last 24 h, `supports_implicit_caching: true`, and `supported_parameters` carrying `tools` and
+> `reasoning_effort` — so the seat's `:high` suffix and tool use survive the pin. Base slugs match
+> every endpoint of their provider (OpenRouter routing doc, *Base Slug Matching*), and Z.AI has
+> exactly one endpoint on this model (1 of 34), so `z-ai` is a single-route pin, not a widened one.
+> The pin's guarantee is first-party serving of the vendor's own weights; what it excludes is the
+> reseller fp4/nvfp4/unknown renditions that the quant label distinguishes, matching 022's use of
+> the same guard on the DeepSeek slug.
+>
+> **The quoted price in *Pricing, dated* was the fp4 route.** $0.0132 / $0.1589 is the
+> price-first head of the endpoint set — the catalogue-level `pricing` on `/api/v1/models` for
+> this slug is literally $0.0113 / $0.1589 / $0.0113, i.e. OpenInference's fp4 endpoint, not a
+> property of the slug. The pinned route's rate is $0.15 / $0.50 / $0.03.
+>
+> **Price consequence.** Pinned first-party is **dollar-neutral** with the OpenCode Go metered
+> rates this seat left ($0.15 / $0.50 / $0.03) while freeing the account-shared Go quota that was
+> the forcing constraint — the reason for the move survives intact. The unpinned cheapest route
+> would be the cheaper seat (≈$23.5 vs ≈$77 per period at fleet review volume, ~3.3×) — available
+> if the owner ever reverses 022's fidelity principle for review seats, and **not** the default.
+> Accepted cost of the pin: `max_completion_tokens` 131,072 on the Z.AI endpoint against the
+> catalogue's 943,718 (the max across endpoints); reviewer outputs are far below that ceiling, so a
+> request that exceeds it would be the first observable.
+>
+> **Files changed by this amendment:** `models.json` (the `z-ai/glm-5.3-flash` override), this
+> record, `README.md` (the `models.json` structure line — it claimed one routing guard).
