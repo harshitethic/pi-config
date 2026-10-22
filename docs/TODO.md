@@ -1,3 +1,14 @@
+# Seat-config ruling batch — 2026-10-22 (landed; 042 pending)
+
+- **3bf7b2f** decision `subagents/041` — review seats ×3 → `openrouter/z-ai/glm-5.3-flash:high` (owner 2026-10-22; the 2026-10-19 mimo-flash recommendation below was NOT taken).
+- **ff7a78f** 041 fidelity pin — `models.json` `z-ai/glm-5.3-flash` → `only:["z-ai"]`, `allow_fallbacks:false` (022 fidelity principle: unpinned routes serve fp4).
+- **9833b88** `docs/investigations/model-seat-economics-2026-10.md` — CHR **96.8%** working number (owner 2026-10-22); cache-read rate dominates cost at that CHR.
+- **28f10c2** seat-doc corrections (audit items 1–5 + warm-up note).
+- **2bbcae3** rulings (two commits: refactor `1f960ea` + change `4b91aea`): fleet fallback returns `FLEET_MODEL_SPEC` provider-qualified join (`extensions/lib/fleet-model.ts`, consumers: compaction + 3 fallback arms); bug-triage unpinned by rule (`decisions/bug-triage/001` note); main sessions owner-managed (036/038 dated notes) — owner switches manually, currently `openrouter/xiaomi/mimo-v2.6-pro`.
+- **pending** decision `subagents/042` — Go coupon-fill strategy (fleet = DeepSeek on Go only, target ~100% of prepaid allotment, DS overflow past coupon → `openrouter/deepseek/deepseek-v4.1-flash-1017`, never Zen) + `models.json` `xiaomi/mimo-v2.6-pro` → `order:["xiaomi"]` preference pin. Implementer in flight 2026-10-22.
+
+---
+
 # Seat-burn measurement — MiMo-V2.6-Pro bucket watch (WO-2026-053)
 
 **Status**: scheduled 2026-10-18; tool landed 2026-10-18 (`docs/data/seat_burn.py`, WO-2026-053,
@@ -36,6 +47,12 @@ new seat): compare session meter share vs the pre-flip 76%; the thresholds above
 discharged by the flip — the open question is whether GLM-Flash holds the planning/orch
 seat (no measured Orch score; promotion path `glm-5.3` — Go Plus solo limit $120 per
 qcode.cc 2026-10-15, third-party single-source).
+**Update 2026-10-22 (038 supersedes again — owner-managed):** main sessions are owner-switched
+(currently `openrouter/xiaomi/mimo-v2.6-pro`) — the 10-21 recheck reads a moving target; measure
+only against a stable-seat window. Reviewers left the Go meter (041 → OpenRouter GLM fp8). Go's
+remaining exposure = fleet/compaction/carry on DeepSeek only → policy is now the coupon-fill
+strategy (042, in flight). OpenRouter became policy-load-bearing (041 pin + `-1017` overflow),
+so the credit-balance watch above is live again.
 ---
 
 # Experiment — MiMo V2.6 Flash as the decorrelated reviewer tier (decision 023)
@@ -213,19 +230,22 @@ doc/decision note on "E2E mandatory for createWorktree changes".
 Ruling record: tfd `docs/reviews/process-controls.md` R3–R6 (owner 2026-10-19), family policy
 with R8 (owner 2026-10-08: mechanical registry-tool gate, never a text heuristic).
 
-- **WO-2026-054 (R3+R4+R6) — in flight 2026-10-19**, implementer `subagent-b04ea6e6` (reserved
-  at `ba5e9b3`). Checkpoint in-flight-subagent registry; worktree lock/unlock lifecycle + orphan
-  reap on resume; four-state status vocabulary; `owner_asks` completion-report field with the
-  delivery-funnel gate (free text and missing field refused); checkpoint `nextSteps` owner-state
-  bar (same-paragraph row id). On landing: decision `subagents/039-*` (mechanism record; the
-  number is reserved for this landing).
-- **R8 — queued, dispatch after 054 merges.** Mechanical, post-hoc gate; shape per the peer
+- **WO-2026-054 (R3+R4+R6) — IMPLEMENTED BUT NEVER MERGED** (reconciled 2026-10-22). Execution
+  `f8bbbe6` (2026-10-19) sits on branch `pi-subagent-8e559b224caa`, unmerged: 15 files, +3057/−151
+  (`extensions/lib/owner-row.ts`, `extensions/lib/subagent-state.ts`, worktree-lock /
+  owner-asks-gate / state-vocabulary / checkpoint-recoverability suites, subagent-async rewrite).
+  Main has moved since (`index.ts`, `checkpoint.ts` both changed) — needs an integration pass and
+  an owner call: land or abandon. Mechanism record never filed either (the reserved number 039
+  was consumed by `039-gate-suite-single-run`, 2026-10-20); file at the next free number when it
+  lands. **Does anything pending assume it?** `docs/investigations/checkpoint-sanity-check-2026-10.md`
+  cites it — check premises before answering Q1–Q4.
+- **R8 — queued; precondition (054 merges) is NOT met — 054 is unmerged (see above).** Mechanical, post-hoc gate; shape per the peer
   (2026-10-19): `message_end` steer on the review-gate soft-prompt precedent,
   `extensions/subagent-async`. Builds on 054's `owner_asks` validator (row-id form + registry
   existence). Follow-up WO against the post-054 tree.
 - **R5 — not ours**: tfd `scripts/docs_validate.py`, now tfd WO-2026-264 (`1b40b61c`).
 
-# Reviewer-tier repick — pending owner go (2026-10-19)
+# Reviewer-tier repick — SUPERSEDED by `subagents/041` (owner 2026-10-22); kept for record
 
 Analysis complete; cost metric per owner ruling 2026-10-19: **estimated MTok/month** (=
 model-tiers/004 effective monthly volume; meter weight drops out of comparisons — doc update
@@ -245,4 +265,11 @@ trial with GLM-5.3-Flash control arm (023-style dual-run verdicts), pre-register
 Landing WO also carries: 038 seat-assignment fix (TFD orchestrators deliberately on
 `mimo-v2.6-pro` per owner 2026-10-19 — supersession note + 10-21 `seat_burn` recheck reads
 MiMo orchestrators, not GLM), reviewer-vs-main-session GLM attribution via `seat_burn.py`, and
-the MTok/month metric doc update. Decision number for this landing: `subagents/040-*`.
+the MTok/month metric doc update. ~~Decision number for this landing: `subagents/040-*`~~ (040
+consumed by `040-refactor-first`, 2026-10-21).
+
+**Ruling 2026-10-22 (`subagents/041` + `ff7a78f` fidelity pin):** review seats ×3 →
+`openrouter/z-ai/glm-5.3-flash:high`, pinned first-party fp8 (`only:["z-ai"]`, no fallbacks).
+The mimo-v2.6-flash recommendation above was NOT taken. Surviving follow-ups from the landing-WO
+contents: reviewer-vs-main-session GLM attribution via `seat_burn.py`, MTok/month metric doc
+update (038's supersession note landed at `2bbcae3`).

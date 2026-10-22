@@ -110,7 +110,9 @@ Required changes folded into WO-2026-055: (1) validity guard — record file mti
 - `StrippedAssistant` (`checkpoint.ts:45-48`) is dead type residue.
 
 ### 5.6 Pipeline notes
-- WO-2026-054's implementation (`f8bbbe6`) is on an unmerged side branch; `docs/TODO.md:216` correctly says "in flight".
+- WO-2026-054's implementation (`f8bbbe6`) is on an unmerged side branch
+(`pi-subagent-8e559b224caa`); `docs/TODO.md`'s 054 row (updated 2026-10-22) records it as
+unmerged, awaiting an owner call.
 - Installed pi 0.83.0 is ~5 weeks behind npm latest (1.3.0); the package's own docs describe features (`retainedTail`) its code lacks.
 
 ## 6. Verdict + recommended actions

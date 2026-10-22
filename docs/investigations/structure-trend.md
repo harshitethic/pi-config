@@ -18,6 +18,18 @@ refactor lands.
 | `extensions/{checkpoint,auto-checkpoint}` read tracking | 1 (2026-10-21) | open — one duplicate copy remains in `auto-checkpoint.ts` (blocked: another session's WIP, migration order pending owner ruling) | fold `auto-checkpoint.ts` onto `extensions/lib/read-tracking.ts` |
 | `extensions/checkpoint.ts` growth | 1 (2026-10-21) | **resolved 2026-10-21 by WO-2026-057** — the named extraction landed (901 → 818 lines; git/token helpers now in `extensions/lib/checkpoint-meta.ts`) | done |
 
+## 2026-10-22 — chunk: seat-config ruling batch (3bf7b2f, ff7a78f, 9833b88, 28f10c2, 2bbcae3)
+
+**Growth:** production delta small — `extensions/lib/fleet-model.ts` (one join exported),
+`compaction-model.ts`, `subagent-async/index.ts` (3 fallback arms); remainder is decisions/docs
+(21 files, +379/−51). No new extraction candidates; the batch *consumed* one — the provider-less
+`FLEET_MODEL` fallback copy is now a single `FLEET_MODEL_SPEC` join with two consumers.
+
+**Unification:** `models.json` touched by two landings (fidelity pin `ff7a78f`, mimo preference
+pin pending in 042) — both through the single override mechanism, no parallel path; the
+458-request bare-slug drift anomaly (seat audit 2026-10-22) is the closed proof case.
+No strikes.
+
 ## 2026-10-21 — chunk: boundary-pin derivation (test-side only)
 
 Closes the two follow-ups parked in the spawn-env idiom entry below. Zero
