@@ -711,10 +711,6 @@ export default function (pi: ExtensionAPI) {
 			),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const ownerState = checkOwnerState(params.nextSteps ?? "", ctx.cwd);
-			if (ownerState.error) return ownerState.error;
-			if (ownerState.warning) ctx.ui.notify(ownerState.warning, "warning");
-
 			let targetStat;
 			try {
 				targetStat = await stat(params.newCwd);
@@ -730,6 +726,12 @@ export default function (pi: ExtensionAPI) {
 					isError: true,
 				};
 			}
+
+			// Argument shape first: the R6 verdict (refusal or warning) goes on the
+			// tool result, so it must not sit behind an early `return`.
+			const ownerState = checkOwnerState(params.nextSteps ?? "", ctx.cwd);
+			if (ownerState.error) return ownerState.error;
+			if (ownerState.warning) ctx.ui.notify(ownerState.warning, "warning");
 
 			const next = params.nextSteps ?? "Continue work";
 			const doContinue = params.continue !== false;

@@ -28,7 +28,7 @@ import {
 	SettingsManager,
 	type AgentSession,
 } from "@earendil-works/pi-coding-agent";
-import checkpointExtension from "../extensions/checkpoint";
+import checkpointExtension, { _testSetInflightScanDir } from "../extensions/checkpoint";
 import { takePendingGo } from "../extensions/go.ts";
 import { childEnv, scrubSubagentEnv } from "./helpers/subagent-env.ts";
 
@@ -980,8 +980,27 @@ describe("checkpoint: summary schema, observability, git binding", () => {
 		const h = makeCheckpointHarness();
 		const sourceCwd = await gitFixture();
 		const targetCwd = await mkdtemp(join(tmpdir(), "ckpt-fork-target-"));
+		const registryDir = await mkdtemp(join(tmpdir(), "ckpt-fork-inflight-"));
 		const notifications: Array<{ message: string; level: string }> = [];
 		const switched: { path?: string; followUp?: string[] } = {};
+		// R3-1 on the fork side (WO-2026-060 review, finding 2): one in-flight
+		// child, so the composed summary the fork archives AND seeds can be
+		// pinned. The empty-registry case is pinned by the recoverability suite;
+		// this is the row that would catch a fork-side `composeSummary` regression
+		// the result text alone cannot see.
+		const inflightSid = "subagent-f0000000-1111-4222-8333-444444444444";
+		await writeFile(join(registryDir, "orphan.session.jsonl"), "{}\n");
+		await writeFile(
+			join(registryDir, `pi-subagent-${inflightSid}.meta.json`),
+			JSON.stringify({
+				ownerPid: process.pid,
+				agentName: "implement",
+				task: "still running",
+				isolationBranch: "pi-subagent-444444444444",
+				sessionFile: join(registryDir, "orphan.session.jsonl"),
+			}),
+		);
+		_testSetInflightScanDir(registryDir);
 		try {
 			const head = sh(sourceCwd, ["git", "rev-parse", "HEAD"]);
 			const branch = sh(sourceCwd, ["git", "rev-parse", "--abbrev-ref", "HEAD"]);
@@ -1030,6 +1049,9 @@ describe("checkpoint: summary schema, observability, git binding", () => {
 			expect(meta.newCwd).toBe(targetCwd);
 			expect(meta.summaryFields).toEqual(fields);
 			expect(meta.summary.startsWith("Goal: Fork into the target dir")).toBe(true);
+			// The machine section rode the composed summary into the archive.
+			expect(meta.summary).toContain("### In-flight subagents");
+			expect(meta.summary).toContain(inflightSid);
 			expect(meta.sessionId).toBe("test-session");
 
 			// The fork's seeded message is the rendered summary — the same string.
@@ -1044,8 +1066,10 @@ describe("checkpoint: summary schema, observability, git binding", () => {
 			expect(seeded.message.content[0].text).toBe(meta.summary);
 			expect(switched.followUp?.[0]).toBe("NEXT-STEP");
 		} finally {
+			_testSetInflightScanDir(undefined);
 			await rm(sourceCwd, { recursive: true, force: true });
 			await rm(targetCwd, { recursive: true, force: true });
+			await rm(registryDir, { recursive: true, force: true });
 			await rm(defaultSessionDir(targetCwd), { recursive: true, force: true });
 		}
 	}, 60_000);

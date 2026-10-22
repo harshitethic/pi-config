@@ -328,7 +328,7 @@ export function validateNextStepsOwnerState(
 		}
 		rows = parseRegistryRows(out.stdout);
 	} catch (err) {
-		return degraded(`could not be spawned (${err instanceof Error ? err.message : String(err)})`);
+		return degraded(`could not be run (${err instanceof Error ? err.message : String(err)})`);
 	}
 
 	const missing = form.rowIds.filter((id) => !registryRowMatches(rows, id));

@@ -329,6 +329,59 @@ describe("recoverOrphanedSubagents (decision 027)", () => {
 		expect(_testRunning.has(sid)).toBe(false);
 	});
 
+	// R4 (decision 043): the recovered-session close path's reporter is already
+	// gone, so it cannot refuse — the one disclosed gate exemption ("the report
+	// it carries never passed a live gate"). Pin the exemption: the meta's own
+	// systemPrompt declares `owner_asks`, which makes this recovered child
+	// `ownerAsksRequired` (index.ts's recovered `RunningSubagent`), and its
+	// report is malformed — yet the close still delivers. Wiring the gate into
+	// this path would drop every recovered delivery silently, because a
+	// recovered child's messages never reach this process (`messages: []` →
+	// "missing `owner_asks`"). The refusing half — the same report through the
+	// live close handler — is pinned in tests/subagent-owner-asks-gate.test.ts.
+	it("delivers a recovered result whose report declares owner_asks (the R4 exemption for a dead reporter)", () => {
+		const dir = mkdtempSync(path.join(tmpdir(), "pi-recovery-"));
+		tempDirs.push(dir);
+		const sid = "subagent-recovered-owner-asks";
+		writeTriplet(
+			dir,
+			sid,
+			{
+				agentName: "implement",
+				task: "t",
+				cwd: dir,
+				ownerPid: 4242,
+				ownerStartToken: "gone",
+				systemPrompt: "## Completion report\n\n**owner_asks:** none, or `<file>#<id>` row ids\n",
+			},
+			"── Turn 1 ──\n**status:** complete\n\n**owner_asks:** merge it already, no row\n── Completed (1 turns, exit 0) ──\n",
+		);
+
+		const { pi, sent } = makePi();
+		_testSetLiveSessionCtx(makeCtx());
+		const sockets: FakeSocket[] = [];
+		recoverOrphanedSubagents(pi as any, makeCtx(), {
+			dir,
+			selfPid: SELF_PID,
+			probe: probeFrom(new Map()), // owner gone → adopt
+			connect: () => {
+				const s = makeFakeSocket();
+				sockets.push(s);
+				return s as any;
+			},
+		});
+
+		expect(sockets.length).toBe(1);
+		sockets[0].fire("connect");
+		sockets[0].fire("close");
+
+		// Delivered, not refused: the recovered path cannot steer a dead reporter.
+		expect(sent.length).toBe(1);
+		expect(sent[0]).toContain("[Isolation] Recovered from previous session.");
+		expect(sent[0]).toContain(`session: ${sid}`);
+		expect(_testRunning.has(sid)).toBe(false);
+	});
+
 	it("skips a live foreign owner without opening a connection", () => {
 		const dir = mkdtempSync(path.join(tmpdir(), "pi-recovery-"));
 		tempDirs.push(dir);

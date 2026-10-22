@@ -222,7 +222,10 @@ describe("checkpoint summary records in-flight subagents (R3-1)", () => {
 		expect(restored).toContain("In-flight subagents");
 	});
 
-	it("checkpoint_fork carries the section into the new session's summary", async () => {
+	// The composed summary the fork archives and seeds is pinned in
+	// tests/e2e-checkpoint.test.ts S11 (this stub drops `/go`, so it only sees
+	// the prepared result); here the fork row pins the count the model reads.
+	it("checkpoint_fork reports the in-flight count in its tool result", async () => {
 		writeOrphaned("subagent-ffffffff-1111-4111-8111-111111111111");
 		const target = join(dir, "target");
 		mkdirSync(target);
