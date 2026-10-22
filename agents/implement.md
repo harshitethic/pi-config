@@ -231,6 +231,10 @@ orchestrator. Two specific notes:
 For code-changing work that ran a review, include the review/test
 fields so the orchestrator can verify both reviewers signed off:
 
+- **owner_asks** — the owner-addressed asks this report raises, as
+  registry row ids. The harness refuses the report if the field is
+  missing or holds anything but `none` or `<file>#<id>` ids (tfd
+  process-controls R4): register the ask as a row first, then cite it.
 - `assumptions_made` — any invariant you assumed that wasn't explicit
 - `unexpected_changes` — files touched outside scope, with reason
 - `issues_encountered` — bugs found, workarounds applied, expected-fail
@@ -248,6 +252,11 @@ Use this format:
 **Completion Report**
 
 **status:** complete | blocked | partial
+
+**owner_asks:** none, or `<file>#<id>` row ids (comma-separated)
+(Every ask addressed to the owner from this report goes to the registry
+first; name its row here. Free text, or a missing line, is refused by
+the harness — reissue the report with the row id, or `none`.)
 
 **invariant_exhaustiveness:** explicit | implicit
 (Use `explicit` if you found no implicit invariants beyond what the

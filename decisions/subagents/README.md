@@ -49,3 +49,4 @@ date: 2026-07-14
 | 040 | Refactor first: a preparatory refactor per work order, `REFACTOR FIRST` refusals, two-strikes area closure (owner only overrides) | done |
 | 041 | Review seats → `openrouter/z-ai/glm-5.3-flash:high` (off OpenCode Go extra-usage billing; model unchanged) | done |
 | 042 | OpenCode Go is a coupon: fill it with DeepSeek fleet traffic only; `xiaomi/mimo-v2.6-pro` routing preference pin | done |
+| 043 | Owner state by row id (`owner_asks` gate, `nextSteps` bar) + checkpoint recoverability (in-flight record, worktree lock/reap, four-state status) | done |

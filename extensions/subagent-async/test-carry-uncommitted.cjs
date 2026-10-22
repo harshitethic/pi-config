@@ -226,6 +226,10 @@ async function createWorktreeMirror(parentCwd, sessionId, baseRef, carryUncommit
 	// Mirror of A1: the session id is fresh per spawn, so the stale dir normally
 	// does not exist; skip both cleanup subprocesses when it does not.
 	if (fs.existsSync(worktreePath)) {
+		// Unlock before the force-remove: a leftover carries OUR session id, so
+		// the lock (R3-2) is ours to drop — and git refuses force-remove of a
+		// locked tree.
+		try { gitSync(["worktree", "unlock", worktreePath], quiet); } catch { /* */ }
 		try { gitSync(["worktree", "remove", "--force", worktreePath], quiet); } catch { /* */ }
 		try { gitSync(["branch", "-D", branchName], quiet); } catch { /* */ }
 	}
@@ -238,6 +242,10 @@ async function createWorktreeMirror(parentCwd, sessionId, baseRef, carryUncommit
 	} catch {
 		return null; // worktree add failure is fatal, like the real code
 	}
+	// R3-2 lock, immediately after `worktree add`. The full lock/unlock/reap
+	// matrix lives in test-worktree-lock.cjs; here it exists so the teardown
+	// below mirrors the real cleanup's unlock-then-remove.
+	try { gitSync(["worktree", "lock", "--reason", `pi-subagent ${sessionId}`, worktreePath], quiet); } catch { /* */ }
 	let carried;
 	if (carryUncommitted && !baseRef) {
 		try {
@@ -312,6 +320,7 @@ function git(dir, args) {
 
 function cleanupWorktree(parentDir, result) {
 	if (!result) return;
+	try { execFileSync("git", ["worktree", "unlock", result.worktreePath], { cwd: parentDir, stdio: "ignore" }); } catch { /* */ }
 	try { execFileSync("git", ["worktree", "remove", "--force", result.worktreePath], { cwd: parentDir, stdio: "ignore" }); } catch { /* */ }
 	try { fs.rmSync(result.worktreePath, { recursive: true, force: true }); } catch { /* */ }
 	try { execFileSync("git", ["branch", "-D", result.branchName], { cwd: parentDir, stdio: "ignore" }); } catch { /* */ }
