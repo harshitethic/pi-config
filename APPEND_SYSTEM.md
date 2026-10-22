@@ -81,7 +81,7 @@ Give the evidence (sites and sizes) and propose the preparatory refactor. A refu
 - **growth**: file and function size deltas, and candidate extractions;
 - **unification**: parallel mechanisms for one idea, and files that unrelated work items all had to touch.
 
-An area flagged by two landings, or by one `REFACTOR FIRST` refusal, goes on the register as **closed**: no feature work lands there until its refactor does. The orchestrator schedules the refactor next. Growth findings are delta-based, never absolute thresholds. A snapshot's counts are claims (§ Make a rule complete by structure), re-run at the landed tip, never copied from a completion report.
+An area flagged by two landings, or by one `REFACTOR FIRST` refusal, goes on the register as **closed**: no feature work lands there until its refactor does. The orchestrator schedules the refactor next. Growth findings are delta-based, never absolute thresholds, except that a repo may set a small-file floor below which growth does not count (tfd: 1,000 lines, `docs/reviews/refactor-priority-2026-10.md#RP9`). A snapshot's counts are claims (§ Make a rule complete by structure), re-run at the landed tip, never copied from a completion report.
 
 **Keep the remote current.** The remote mainline is an integration point, not a release branch: a green increment that breaks no existing feature is a valid landing even when the feature it belongs to is unfinished — don't hold green work waiting for completeness, and never push red. Pull (fetch + integrate the mainline) before starting a change and again before merging; push merged work promptly, or state explicitly that the push is pending.
 

@@ -62,4 +62,7 @@ that the expected outcome:
   written, and the work still landed.
 - *A size threshold that closes a file.* Rejected: tfd's large files are already over any
   threshold, and growth stays delta-based. An area closes on evidence (strikes), not size.
+  **Amended 2026-10-23 (owner, tfd `docs/reviews/refactor-priority-2026-10.md#RP9`):**
+  growth below a repo's small-file floor does not count (tfd: lines up to 1,000). This adds an
+  exemption floor; no size closes a file, so the rejection stands.
 - *Orchestrator or reviewer override.* Rejected: an override is how acknowledged debt landed.
