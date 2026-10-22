@@ -574,3 +574,22 @@ Negative claims are scoped to the files searched: `apps/changelog-gen`,
 beyond the searches above. Candidate 1's spans and candidate 3's regex lines
 were counted; candidates 2 and 4 are structural estimates from matched spans.
 The working tree was not read (another session's WIP excluded by instruction).
+
+## Snapshot 2026-10-22 — WO-2026-060 lands WO-2026-054 (merge `fa84a99`)
+
+**growth.** `extensions/subagent-async/index.ts` takes the mechanism back (+~1.4k: registry
+section, worktree lock/unlock, owner_asks + nextSteps gates), but the branch did the 040
+extraction unprompted: `extensions/lib/subagent-state.ts` (~395 lines) is the sole state
+reader (`readSubagentState`: definition + one consumer) and `extensions/lib/owner-row.ts`
+holds both validators. New suites: worktree-lock (447 lines), state-vocabulary (328),
+owner-asks-gate, recovery-ownership. Review found no new extraction candidates; the ranked
+table above is unchanged and none of its four entries shrank.
+
+**unification.** The merge removed one parallel mechanism rather than adding one:
+`composeSummary`'s predecessor is gone — `renderSummary` is the single summary composer
+(2 call sites, both `composeSummary(renderSummary…)`). `extensions/checkpoint.ts` has now
+been touched by two landings (057 extraction, 060 merge re-point), both summary-shape work
+and related (060 re-bases on 057's contract) — no flag, stays on the watch list. The one
+cross-cutting pattern in the landing: hidden post-branch conventions (the spawn-env/
+hermeticity gate) reddened 14 branch rows until the suites adopted main's idiom — the cost
+was discovery, not design.
