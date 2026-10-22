@@ -12,6 +12,7 @@ import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { childEnv, scrubSubagentEnv } from "./helpers/subagent-env.ts";
+import { FLEET_MODEL, FLEET_PROVIDER } from "../extensions/lib/fleet-model.ts";
 
 // The two peers stand in for user-launched TUI sessions, which never carry the
 // harness's PI_SUBAGENT_* — drop them here and hand the live env to each spawn
@@ -20,7 +21,7 @@ scrubSubagentEnv();
 
 const MAILBOX = await mkdtemp(join(tmpdir(), "peer-smoke-mail-"));
 const WORKDIR = await mkdtemp(join(tmpdir(), "peer-smoke-work-"));
-const MODEL = process.env.PI_SMOKE_MODEL ?? "openrouter/deepseek/deepseek-v4-flash";
+const MODEL = process.env.PI_SMOKE_MODEL ?? `${FLEET_PROVIDER}/${FLEET_MODEL}`;
 
 interface Child {
 	proc: ReturnType<typeof spawn>;
