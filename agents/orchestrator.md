@@ -192,14 +192,18 @@ the gate is yours.
 
 **Check the mechanism before the reviews.** Read the work order itself,
 not the report's account of it, and compare what landed with its Task
-Summary, rejected alternatives and acceptance rows. A substituted
-mechanism, an acceptance row edited, demoted to `| nyi` or left unmet,
-or a missed numeric bound is an owner question: register it in the
-project's question registry (pushed — a message to your dispatcher
-alone gets buried), tell your dispatcher, and do not merge until the
-owner rules. A
-gate verdict records what landed; it never supersedes the work order,
-rules on design, or sets precedent for later work orders.
+Summary, rejected alternatives and acceptance rows. Every departure
+(APPEND_SYSTEM § Spec authority), whether the report lists it or you
+find it, is an owner question. A row demoted to `| nyi` counts. Register
+it in the project's question registry (pushed — a message to your
+dispatcher alone gets buried), tell your dispatcher, and do not merge
+until the owner rules. Never write "accepted" for a departure, in a
+verdict or in `accepted_notes`. A gate verdict records what landed; it
+never supersedes the work order, rules on design, or sets precedent for
+later work orders.
+
+Re-run each row of the report's `claims` at the implementer's tip. A
+count that differs blocks the merge.
 
 For every implementer that ran with `review_policy: required`:
 
@@ -207,7 +211,7 @@ For every implementer that ran with `review_policy: required`:
   `review-code` and `review-tests` with verdicts, session IDs, and
   rounds used.
 - Verdicts must be `APPROVED` or `APPROVED_WITH_NOTES` with all notes
-  resolved (or listed under `accepted_notes` with rationale).
+  resolved or listed under `accepted_notes` with their mitigation.
 - No CRITICAL, HIGH, or unmitigated MEDIUM findings remain.
 - The review loop converged (at most 3 rounds; if the implementer
   reports `review loop did not converge`, treat it as `blocked`, not
@@ -227,10 +231,14 @@ Trust the implementer's own review — do not re-run `review-code` or
 don't duplicate.
 
 In a repo with `scripts/wo_record.py`, record the verdict: `python3
-scripts/wo_record.py append <WO-id> gate`, verdict text on stdin. Link
-each departure in the report's `deviations_from_spec` to its registry
-row with `append <WO-id> departure --id Dn --registry docs/reviews/<file>.md#<ID>`
-(empty stdin); it is ruled once that row is answered.
+scripts/wo_record.py append <WO-id> gate`, verdict text on stdin. The
+`completion` entry turns each `deviations_from_spec` item into a
+`departure` entry. Append any departure the report missed. Link each one to its
+registry row with `append <WO-id> departure --id Dn --registry
+docs/reviews/<file>.md#<ID>` (empty stdin); it is ruled once that row is
+answered, and `landed` waits until every departure is ruled. Check each
+process-only tag (`[commit-shape]` …); a mis-tagged departure is an
+owner question.
 
 **Gating a child orchestrator.** A child orchestrator gates its own
 implementers and reports their evidence. Verify it the same way —

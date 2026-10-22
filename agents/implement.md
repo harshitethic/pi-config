@@ -101,7 +101,9 @@ This is your primary value — be thorough.
   Found: [what you actually found]
   Suggested fix: [brief note for orchestrator]
 
-  Do NOT attempt to fix the plan yourself. Return the mismatch.
+  Mark it as an owner question when it is a departure (APPEND_SYSTEM
+  § Spec authority). Do NOT attempt to fix the plan yourself. Return
+  the mismatch.
   This overrides any brief or work-order wording that invites you to
   "propose" or "correct" a mechanism: proposing means putting it in
   the mismatch report, never landing it. A mechanism other than the one
@@ -150,13 +152,13 @@ Each reviewer's task must include:
 (d) the **full build/test/lint output** with the exact command(s)
     you ran and the git commit/dirty-state at run time,
 (e) a **project-context digest** (see below),
-(f) your assumptions, deviations from spec, and any issues
-    encountered during implementation.
+(f) your assumptions, your `deviations_from_spec` items, and any
+    issues encountered during implementation.
 
 Give the work order's path, and quote (a) as the work order says it —
-never your summary. List each deviation as a plain fact (what the order
+never your summary. List each item as a plain fact (what the order
 specified, what landed). Never ask a reviewer to judge whether a
-deviation is justified: that is an owner ruling (APPEND_SYSTEM § Spec
+departure is justified: that is an owner ruling (APPEND_SYSTEM § Spec
 authority), and a reviewer who finds one rejects it.
 
 #### Project-context digest
@@ -204,11 +206,8 @@ your own code now:
    note any invariant-driven extras in your completion report.
 7. **Unexpected-state arms**: For every `_`, `else`, `None`,
    `unwrap_or*` or early-return arm you added or kept on the touched
-   path, name the state it handles. A state the design says cannot
-   occur panics with a message naming it; a copy, skip, no-op or
-   declined optimization there is a fallback even when output stays
-   correct (global rules, "Fail early and hard; no safe defaults").
-   If the design gives the state no meaning, stop and ask.
+   path, name the state it handles and apply APPEND_SYSTEM § Fail
+   early and hard; no safe defaults.
 
 ### 6. When reviewers return — reconcile and finalize
 
@@ -225,7 +224,7 @@ orchestrator. Two specific notes:
   Invariants section is actually exhaustive and no implicit invariants
   exist, note this in your completion report so the orchestrator can
   calibrate future routing (the task may have been over-routed to you).
-- **Deviations must be explicit.** If you changed anything outside the
+- **Unexpected changes must be explicit.** If you changed anything outside the
   stated scope to satisfy an invariant, surface it. Silent scope creep
   poisons future routing.
 
@@ -259,7 +258,15 @@ X because Y.")
 
 **tests:** command and result
 
-**deviations_from_spec:** none, or list with justification
+**deviations_from_spec:** none, or each process-only fact (APPEND_SYSTEM
+§ Spec authority) prefixed with its class: `[commit-shape]`,
+`[moved-citation]`, `[count-correction]` or `[doc-path]`. An untagged
+item is a departure and blocks landing until the owner rules. A
+departure you could see before landing should have been a step-2
+`PLAN MISMATCH`.
+
+**claims:** each structural claim in this report with its `rg` and
+count at your tip (APPEND_SYSTEM § Make a rule complete by structure).
 
 **structural_checks:** (one line per item from the work order's
 StructuralRisks) — entry point / input validation / test surface /
@@ -377,9 +384,9 @@ The reviewer returns one of:
 - **APPROVED** — both reviewers must be APPROVED (or
   APPROVED_WITH_NOTES with all notes resolved) for you to report
   `complete`.
-- **APPROVED_WITH_NOTES** — resolve every note where practical;
-  low-severity notes accepted as-is (mitigated, out of scope, or a
-  documented tradeoff) go in `accepted_notes`.
+- **APPROVED_WITH_NOTES** — resolve every note; a note you keep open
+  goes in `accepted_notes` with its mitigation (review-code Approval
+  bar). A departure is never an accepted note.
 - **REJECT_AND_REWORK** — fix the issue, then apply the
   [per-reviewer re-review targeting rule](#per-reviewer-re-review-targeting)
   below (Cases A/B/C) to decide which reviewers to re-run. Always

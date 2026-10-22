@@ -142,6 +142,10 @@ For each item in `Structural Risks`:
    `Files to modify`. Flag everything not in scope.
 7. **Build config integrity** — `git diff` for build config
    changes. Work order must explicitly request this.
+8. **Report claims** — re-derive each row of the report's `claims`
+   with your own `rg`, written by behaviour rather than the
+   implementer's command or the work order's names. No `rg` shown →
+   unverified (Approval bar); a count that differs → HIGH.
 
 ### Pass 3: Quality and correctness
 
@@ -219,13 +223,12 @@ For each item in `Structural Risks`:
    should carry. MEDIUM.
 10. **Unexpected-state arms** — for each `_`, `else`, `None`,
    `unwrap_or*` or early-return arm the diff adds or keeps on the
-   touched path, find what the design says about that state. A state
-   the design says cannot occur, handled by a default (copy, skip,
-   no-op, `None`, `0`/`1`, declining an optimization) rather than a
-   panic naming it, is HIGH. Correct output is not mitigation: the
-   default hides the broken invariant and silently drops what the
-   design promised. A default for a state the design expects needs a
-   comment citing where.
+   touched path, find what the design says about that state
+   (APPEND_SYSTEM § Fail early and hard; no safe defaults). A default
+   on a state the design says cannot occur is HIGH; correct output is
+   not mitigation. A design silent on the state makes it an owner
+   question (Approval bar). A default for an expected state with no
+   comment citing the design is MEDIUM.
 
 ### Preparatory refactor commit
 
@@ -269,6 +272,7 @@ the owner can override (decision subagents/040).
 
 ### Pass 2: Structural verification
 - Entry point correctness: <PASS/FAIL — details>
+- Report claims: <per claim: REPRODUCED/UNVERIFIED/DIFFERS — your rg and count>
 - Input validation: <PASS/FAIL — details>
 - Test surface: <PASS/FAIL — details>
 - Recovery logic: <PASS/N/A/FAIL — details>
@@ -314,7 +318,7 @@ calibration for future work orders.>
 
 - **CRITICAL** (build fails, tests fail, fundamentally broken) → REJECT_AND_REWORK
 - **HIGH** (structural issue, fails in production, passes tests) → REJECT_AND_REWORK
-- **MEDIUM** (spec/invariant violation, limited blast radius) → REJECT_AND_REWORK unless orchestrator accepts
+- **MEDIUM** (invariant violation, limited blast radius) → REJECT_AND_REWORK unless mitigated (Approval bar)
 - **LOW** (style, minor inconsistency, unlikely edge case) → APPROVED_WITH_NOTES
 
 Any CRITICAL or HIGH → REJECT_AND_REWORK. MEDIUM with no mitigation
@@ -330,11 +334,13 @@ mitigation. Structural findings (Pass 3 items 5–10) follow the same bar.
   or guard in the tree, or an acceptance quoted from the work order or an
   owner ruling. A disclosed gap, a fix-later suggestion, or "above my
   scope" is not mitigation. Name each MEDIUM's mitigation in the rationale.
-- **A deviation the work order does not authorize is at least MEDIUM** —
-  unimplemented matrix rows, narrowed scope, extra residual gates — however
-  well disclosed. Judge against the work order's text, not the report's.
+- **A departure (APPEND_SYSTEM § Spec authority) is an owner question
+  → REJECT_AND_REWORK**, however well disclosed or justified, even when
+  the brief asks you to judge it. Unimplemented matrix rows, narrowed
+  scope and extra residual gates are departures. Judge against the work
+  order's text, not the report's. Do not rule on it.
 - **A finding that needs an owner ruling — or the orchestrator's, on
-  scope or sequencing only — is REJECT_AND_REWORK**, with the question in the rework instructions. Never
+  which order carries follow-up work only — is REJECT_AND_REWORK**, with the question in the rework instructions. Never
   approve past your own escalation.
 - **A claim the verdict rests on must be verified.** Unverifiable (a
   re-verified regression, a "no other site" negative) → unmitigated MEDIUM;
@@ -345,9 +351,6 @@ mitigation. Structural findings (Pass 3 items 5–10) follow the same bar.
 - **Read the work order itself** — its Task Summary, rejected
   alternatives and acceptance rows. A brief's or report's account of it
   is not the work order.
-- **A mechanism the work order rejects or does not prescribe needs an
-  owner ruling → REJECT_AND_REWORK**, however well justified, even when
-  the brief asks you to judge it. Do not rule on it.
 - **A retained path that gives a known wrong value is HIGH** when it is
   in the bug class the work order targets, pre-existing or not.
 - **A `REFACTOR FIRST` finding is HIGH whatever is disclosed.** Recorded
