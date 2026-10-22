@@ -1,3 +1,9 @@
+// LIVE-NETWORK: this file makes real billed LLM calls on every full `bun test` run.
+// Provider/model: openrouter/xiaomi/mimo-v2.6-flash — the real `pi` binary on an unpinned
+// orchestrator seat, fixed ~13.9k system prompt / ~12 output tokens per spawn.
+// Invisible to session-log attribution: `afterEach` deletes the child transcripts.
+// See docs/investigations/or-workspace-attribution-2026-10.md.
+
 /**
  * Decision 031: the orchestrator seat always runs on its caller's model —
  * caller's `provider/id` at the seat's own thinking level — while every other

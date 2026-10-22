@@ -36,7 +36,9 @@ Most likely: **another machine sharing the `pi-openrouter` key** (`~/.ssh/known_
 > also include an external probe (`~/Developer/tfd-bench/benchmark.py`; `docs/thinking-levels.md`
 > documents a manual two-request caching probe) — an `/activity` diff around one `bun test
 > tests/subagent-model-inheritance.test.ts` run settles it. Attribution lesson: test-spawned LLM
-> calls need labelling; transcript cleanup + in-memory sessions defeat session-log forensics.
+> calls need labelling; transcript cleanup + in-memory sessions defeat session-log forensics. Convention
+> landed 2026-10-22: every file that makes live network calls carries a `LIVE-NETWORK` header, so an
+> attribution sweep starts with `rg LIVE-NETWORK tests/` instead of exhausting the ledger again.
 
 ## Notes
 
