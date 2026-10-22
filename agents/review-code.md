@@ -217,6 +217,15 @@ For each item in `Structural Risks`:
    decision to a stage (e.g. front end vs codegen), flag a later
    stage re-deriving or making a decision an earlier stage made or
    should carry. MEDIUM.
+10. **Unexpected-state arms** — for each `_`, `else`, `None`,
+   `unwrap_or*` or early-return arm the diff adds or keeps on the
+   touched path, find what the design says about that state. A state
+   the design says cannot occur, handled by a default (copy, skip,
+   no-op, `None`, `0`/`1`, declining an optimization) rather than a
+   panic naming it, is HIGH. Correct output is not mitigation: the
+   default hides the broken invariant and silently drops what the
+   design promised. A default for a state the design expects needs a
+   comment citing where.
 
 ### Preparatory refactor commit
 
@@ -315,7 +324,7 @@ APPROVED_WITH_NOTES. Zero issues → APPROVED.
 ### Approval bar (decision 033)
 
 APPROVED_WITH_NOTES means every note is LOW, or MEDIUM with a named
-mitigation. Structural findings (Pass 3 items 5–9) follow the same bar.
+mitigation. Structural findings (Pass 3 items 5–10) follow the same bar.
 
 - **Mitigation is an artifact or a ruling.** A test, pinned `| nyi` row,
   or guard in the tree, or an acceptance quoted from the work order or an

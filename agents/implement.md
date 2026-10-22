@@ -202,6 +202,13 @@ your own code now:
 5. **Build passes**: (already confirmed in step 3).
 6. **No unrequested changes**: Nothing modified beyond the work order;
    note any invariant-driven extras in your completion report.
+7. **Unexpected-state arms**: For every `_`, `else`, `None`,
+   `unwrap_or*` or early-return arm you added or kept on the touched
+   path, name the state it handles. A state the design says cannot
+   occur panics with a message naming it; a copy, skip, no-op or
+   declined optimization there is a fallback even when output stays
+   correct (global rules, "Fail early and hard; no safe defaults").
+   If the design gives the state no meaning, stop and ask.
 
 ### 6. When reviewers return — reconcile and finalize
 
