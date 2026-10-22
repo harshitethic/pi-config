@@ -29,6 +29,11 @@ construction. Full 29-model table (2026-10-18): opencode.ai/v2/docs/console/go.
 GLM-5.3-Flash bucket ($60/mo, 6,320 req/5h), *not* GLM-5.3's $15 bucket; the DeepSeek bucket
 serves implement/oracle/scout/compaction volume. Orchestrator frontmatter stays the level donor.
 
+> **Clarified (2026-10-22, owner):** the main session is owner-managed — its model is a manual
+> per-session `/model` choice, and the `settings.json` default is only the initial value. The
+> GLM-5.3-Flash line above records the 2026-10-18 setting (stale now in any case), not a
+> standing assignment.
+
 **Tradeoffs accepted:**
 - **022's first-party-unquantized pin is abandoned for fleet traffic.** OpenCode Go's DeepSeek
   upstreams (observed 2026-10-18 via `x-opencode-upstream-model-id`: `orcarouter` →

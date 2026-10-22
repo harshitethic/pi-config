@@ -11,6 +11,12 @@ date: 2026-10-18
 `opencode-go/glm-5.3-flash` (fleet-table row updated same day; settings change rode the
 settings WIP). This fills 037's "user session + orchestrators → owner's choice" placeholder.
 
+> **Clarified (2026-10-22, owner):** "our main session model is just set by me switching
+> manually" — the main session is owner-managed, a per-session `/model` choice;
+> `settings.json`'s `defaultModel`/`defaultThinkingLevel` are only the initial value. Read
+> "main-session default" below as the initial value, not a pinned seat; the split's
+> mechanics (031 orchestrator inheritance) are untouched.
+
 **Driver:** [model-tiers/005](../model-tiers/005-shared-allowance-not-buckets.md) (one shared
 weighted allowance, meter = `Σ real$ ÷ listedLimit`) + the first `seat_burn.py` window
 (Oct 17–18, WO-2026-053): session+orchestrator traffic was 31.7% of raw tokens but 50.2% of

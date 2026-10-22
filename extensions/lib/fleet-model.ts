@@ -12,3 +12,11 @@
 export const FLEET_PROVIDER = "opencode-go"
 
 export const FLEET_MODEL = "deepseek-v4.1-flash"
+
+/**
+ * The seat as one provider-qualified spec — what `--model` takes. A spawn that
+ * falls back to the fleet seat passes this, not the bare id: a bare id resolves
+ * against whatever provider the session defaults to, which is how unpinned
+ * routes pick up traffic (owner ruling 2026-10-22).
+ */
+export const FLEET_MODEL_SPEC = `${FLEET_PROVIDER}/${FLEET_MODEL}`

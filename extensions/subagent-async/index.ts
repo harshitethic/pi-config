@@ -17,7 +17,7 @@ import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-age
 import { CustomEditor, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { type AgentConfig, type AgentScope, discoverAgents } from "./agents.ts";
-import { FLEET_MODEL } from "../lib/fleet-model.ts";
+import { FLEET_MODEL_SPEC } from "../lib/fleet-model.ts";
 import { matchesKey, Key, truncateToWidth } from "@earendil-works/pi-tui";
 
 // ── Constants ───────────────────────────────────────────────────────────────
@@ -1836,8 +1836,11 @@ function splitModelSpec(spec: string): { id: string; level?: string } {
  *   caller's model passes through unsubstituted (decisions 020/022).
  * - Resume keeps the recorded model verbatim (decision 022 site 2) —
  *   re-deriving it would silently switch a resumed child's model.
- * - Otherwise the agent frontmatter model wins, `FLEET_MODEL` when the seat
- *   pins none (decision 022).
+ * - Otherwise the agent frontmatter model wins, the fleet spec when the seat
+ *   pins none (decision 022). The spec is provider-qualified
+ *   (`opencode-go/deepseek-v4.1-flash`), never the bare id: a bare id resolves
+ *   against the session default provider and wanders onto unpinned routes
+ *   (owner ruling 2026-10-22).
  *
  * `undefined` means no `--model` flag at all (pi picks its own default).
  * Exported for tests (@for-testing-only): the precedence is the contract.
@@ -1849,14 +1852,14 @@ export function resolveChildModel(opts: {
 	inheritParentModel?: boolean;
 	isResume?: boolean;
 }): string | undefined {
-	if (opts.isResume) return opts.agentModel ?? FLEET_MODEL;
+	if (opts.isResume) return opts.agentModel ?? FLEET_MODEL_SPEC;
 	if (opts.agentName === INHERITING_AGENT) {
-		if (!opts.parentModel) return opts.agentModel ?? FLEET_MODEL;
+		if (!opts.parentModel) return opts.agentModel ?? FLEET_MODEL_SPEC;
 		const level = opts.agentModel ? splitModelSpec(opts.agentModel).level : undefined;
 		return level ? `${opts.parentModel}:${level}` : opts.parentModel;
 	}
 	if (opts.inheritParentModel) return opts.parentModel;
-	return opts.agentModel ?? FLEET_MODEL;
+	return opts.agentModel ?? FLEET_MODEL_SPEC;
 }
 
 // ── Spawn & manage ──────────────────────────────────────────────────────────
