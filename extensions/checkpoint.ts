@@ -191,16 +191,22 @@ function composeSummary(summary: string, section: string): string {
 
 /**
  * R6 (tfd process-controls, owner 2026-10-19): `nextSteps` states owner state
- * only by registry row id. Returns the tool-error result for a violating claim,
- * or null when the field passes (form, plus registry existence when the cwd
- * repo carries `scripts/reviews_status.py`).
+ * only by registry row id. `error` is the tool-error result for a violating
+ * claim (the tool call lands nothing); `warning` is the existence lookup's
+ * degradation when the repo's registry script cannot run — non-blocking, but
+ * carried onto the tool result and a `ui.notify` warning so it is never silent.
  */
-function rejectOwnerStateProse(nextSteps: string, cwd: string) {
+function checkOwnerState(
+	nextSteps: string,
+	cwd: string,
+): { error?: { content: Array<{ type: "text"; text: string }>; isError: true }; warning?: string } {
 	const verdict = validateNextStepsOwnerState(nextSteps, cwd);
-	if (verdict.ok) return null;
+	if (verdict.ok) return { warning: verdict.warning };
 	return {
-		content: [{ type: "text" as const, text: `Error: ${verdict.error}` }],
-		isError: true,
+		error: {
+			content: [{ type: "text" as const, text: `Error: ${verdict.error}` }],
+			isError: true,
+		},
 	};
 }
 
@@ -584,8 +590,9 @@ export default function (pi: ExtensionAPI) {
 			),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const prose = rejectOwnerStateProse(params.nextSteps ?? "", ctx.cwd);
-			if (prose) return prose;
+			const ownerState = checkOwnerState(params.nextSteps ?? "", ctx.cwd);
+			if (ownerState.error) return ownerState.error;
+			if (ownerState.warning) ctx.ui.notify(ownerState.warning, "warning");
 
 			const next = params.nextSteps ?? "Continue work";
 			const doContinue = params.continue !== false;
@@ -638,6 +645,7 @@ export default function (pi: ExtensionAPI) {
 			compactRequested = true;
 
 			const responseLines = [`Checkpoint queued.`];
+			if (ownerState.warning) responseLines.push(ownerState.warning);
 			if (inFlight.length > 0) {
 				responseLines.push(
 					`In-flight subagents recorded in the summary: ${inFlight.length} ` +
@@ -703,8 +711,9 @@ export default function (pi: ExtensionAPI) {
 			),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const prose = rejectOwnerStateProse(params.nextSteps ?? "", ctx.cwd);
-			if (prose) return prose;
+			const ownerState = checkOwnerState(params.nextSteps ?? "", ctx.cwd);
+			if (ownerState.error) return ownerState.error;
+			if (ownerState.warning) ctx.ui.notify(ownerState.warning, "warning");
 
 			let targetStat;
 			try {
@@ -802,6 +811,7 @@ export default function (pi: ExtensionAPI) {
 			ctx.ui.notify(`Fork prepared → ${params.newCwd}. Run /go to switch.`, "info");
 
 			const responseLines = [`Fork prepared → ${params.newCwd}. Run /go to switch.`];
+			if (ownerState.warning) responseLines.push(ownerState.warning);
 			if (inFlight.length > 0) {
 				responseLines.push(`In-flight subagents recorded in the summary: ${inFlight.length}.`);
 			}

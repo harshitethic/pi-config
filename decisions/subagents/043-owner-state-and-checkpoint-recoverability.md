@@ -134,10 +134,16 @@ violating claim lands nothing. With `scripts/reviews_status.py` present at the
 git toplevel, the cited rows are checked against
 `python3 scripts/reviews_status.py --all --plain` (matching full path, path
 suffix, or basename, since the ruling's own example is a basename) and a missing
-row is named in the error. **Fallback:** a repo without the script, or a script
-that errors or times out, degrades to form-only — the bar's shape holds, only
-the existence lookup is lost. This is deliberate: R6's existence half depends on
-a registry the harness does not own.
+row is named in the error.
+
+Two degradations, deliberately different (f4f7d50). A repo **without** the
+script is outside the registry convention, so the check is form-only and silent
+— R6's existence half depends on a registry the harness does not own. A script
+that **is** there but cannot be read — non-zero exit, timeout, unspawnable — is
+an observed failure, not an absent convention: it degrades to form-only too,
+but **loudly**, with a named warning in the tool result (and a `ui.notify`
+warning) stating the script and its failure, so a broken registry cannot pass
+as a clean check.
 
 ## Relationship to 027 and 026
 

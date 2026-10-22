@@ -9,7 +9,8 @@
  *
  * The R6 half also reads the repo registry read-only to check a cited row
  * exists; a repo without `scripts/reviews_status.py` falls back to form-only
- * validation (decisions/subagents/043).
+ * validation, and a script that cannot run degrades loudly
+ * (decisions/subagents/043).
  */
 
 import { spawnSync } from "node:child_process";
@@ -265,17 +266,26 @@ function repoRoot(cwd: string): string | null {
 	}
 }
 
+/** The registry script's own budget, well past any sane run of it. */
+const REGISTRY_TIMEOUT_MS = 20_000;
+
 /**
  * R6, existence half: `nextSteps` owner-state paragraphs must cite a row the
  * repo's registry actually carries. Degrades to form-only when `cwd` has no
- * `scripts/reviews_status.py` (a repo outside the registry convention) or the
- * script fails to run — the bar's shape still holds, only the lookup is lost.
+ * `scripts/reviews_status.py` (a repo outside the registry convention) — the
+ * bar's shape still holds, only the lookup is lost.
+ *
+ * A script that *is* there but fails (non-zero exit, timeout, unspawnable) is a
+ * can-happen state whose correct output would hide a broken registry: it
+ * degrades with a `warning` naming the script and the failure, never silently
+ * (f4f7d50 — no fallback on an observed failure).
+ *
  * @for-testing-only — pure over an injected script path when `opts.root` is set
  */
 export function validateNextStepsOwnerState(
 	nextSteps: string,
 	cwd: string,
-): { ok: true } | { ok: false; error: string } {
+): { ok: true; warning?: string } | { ok: false; error: string } {
 	const form = validateOwnerStateProse(nextSteps);
 	if (!form.ok) return form;
 	if (form.rowIds.length === 0) return { ok: true };
@@ -285,17 +295,40 @@ export function validateNextStepsOwnerState(
 	const script = join(root, REGISTRY_SCRIPT);
 	if (!existsSync(script)) return { ok: true };
 
+	/** Form-only outcome, loud: what could not be checked and why. */
+	const degraded = (detail: string) => ({
+		ok: true as const,
+		warning:
+			`R6 warning — registry existence NOT checked: \`${REGISTRY_SCRIPT}\` is present ` +
+			`but ${detail}. The cited row id(s) ${form.rowIds.map((id) => `\`${id}\``).join(", ")} ` +
+			`passed the form check only.`,
+	});
+
 	let rows: RegistryRow[];
 	try {
 		const out = spawnSync("python3", [script, "--all", "--plain"], {
 			cwd: root,
 			encoding: "utf8",
-			timeout: 20_000,
+			timeout: REGISTRY_TIMEOUT_MS,
 		});
-		if (out.status !== 0 || typeof out.stdout !== "string") return { ok: true };
+		if (out.error) {
+			const timedOut = (out.error as NodeJS.ErrnoException).code === "ETIMEDOUT";
+			return degraded(
+				timedOut
+					? `timed out after ${REGISTRY_TIMEOUT_MS / 1000}s`
+					: `could not be run (${out.error.message})`,
+			);
+		}
+		if (typeof out.stdout !== "string") {
+			return degraded(`produced no readable output (exit ${out.status ?? `signal ${out.signal}`})`);
+		}
+		if (out.status !== 0) {
+			const stderr = (out.stderr ?? "").trim().split("\n")[0] ?? "";
+			return degraded(`exited ${out.status}${stderr ? ` (${stderr.slice(0, 200)})` : ""}`);
+		}
 		rows = parseRegistryRows(out.stdout);
-	} catch {
-		return { ok: true };
+	} catch (err) {
+		return degraded(`could not be spawned (${err instanceof Error ? err.message : String(err)})`);
 	}
 
 	const missing = form.rowIds.filter((id) => !registryRowMatches(rows, id));

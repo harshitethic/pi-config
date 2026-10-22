@@ -356,12 +356,42 @@ describe("R6 registry existence (repo with scripts/reviews_status.py)", () => {
 		}
 	});
 
-	it("falls back to form-only when the repo has no registry script", async () => {
+	it("falls back to form-only, silently, when the repo has no registry script", async () => {
 		const bare = join(dir, "bare");
 		mkdirSync(bare, { recursive: true });
 		Bun.spawnSync(["git", "init", "-q", bare], { env: childEnv() });
 
 		const out = await runCheckpoint({ nextSteps: "The owner approved the row (anything.md#Z1)." }, bare);
 		expect(out.isError).toBeFalsy();
+		// An absent registry is the documented convention boundary, not a failure.
+		expect(out.text).not.toContain("R6 warning");
+		expect(out.notifications).toEqual([]);
 	});
+
+	it("degrades loudly — non-blocking — when the registry script exits non-zero", async () => {
+		const repo = makeRegistryRepo('import sys\nsys.stderr.write("registry broke\\n")\nsys.exit(3)\n');
+		const out = await runCheckpoint({ nextSteps: "The owner approved the row (known.md#K1)." }, repo);
+
+		// Non-blocking: the state is legitimate, only the existence check is lost.
+		expect(out.isError).toBeFalsy();
+		// Loud: the tool result names the script and its failure.
+		expect(out.text).toContain("R6 warning");
+		expect(out.text).toContain("scripts/reviews_status.py");
+		expect(out.text).toContain("exited 3");
+		expect(out.text).toContain("known.md#K1");
+		expect(out.notifications.some((n) => n.level === "warning" && n.message.includes("exited 3"))).toBe(true);
+	});
+
+	// Costs the script's own budget (20s) — the only way to observe a real
+	// spawnSync timeout; the row budgets 60s for it.
+	it("degrades loudly — non-blocking — when the registry script times out", async () => {
+		const repo = makeRegistryRepo("import time\ntime.sleep(120)\n");
+		const out = await runCheckpoint({ nextSteps: "The owner approved the row (known.md#K1)." }, repo);
+
+		expect(out.isError).toBeFalsy();
+		expect(out.text).toContain("R6 warning");
+		expect(out.text).toContain("scripts/reviews_status.py");
+		expect(out.text).toContain("timed out after 20s");
+		expect(out.notifications.some((n) => n.level === "warning" && n.message.includes("timed out"))).toBe(true);
+	}, 60_000);
 });
