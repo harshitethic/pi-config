@@ -113,11 +113,19 @@ GLM per-effort comparisons (see [decision 021](../decisions/subagents/021-effort
   `high`, E2E-verified twice), survives the `/fleet-model deepseek` toggle (0731 maps
   medium→high), and future-proofs for a real z.ai medium.
 
-## Addendum — OpenRouter-only, single fleet model (decision 022, 2026-10-01)
+## Addendum — OpenRouter-only, one model for the DeepSeek seats (decision 022, 2026-10-01;
+seat split 037/041)
 
-- **All seats run `opencode-go/deepseek-v4.1-flash`** (orchestrator, implementer, 3
-  reviewers, 2 scouts, oracle, compaction). The z.ai subscription is gone; the
-  `/fleet-model` toggle and `~/.pi/fleet-model.json` override were deleted.
+- **Seats no longer share one model — seat-specific split, the 022 all-seats-on-flash
+  line superseded** (037, 041): implementer, scouts ×2 and compaction on
+  `opencode-go/deepseek-v4.1-flash` (`:high`/`:low`/`:low`); reviewers ×3 on
+  `openrouter/z-ai/glm-5.3-flash:high` (Zhipu lab since
+  [037](../decisions/subagents/037-reviewer-oracle-repick.md), first-party route pin per
+  [041](../decisions/subagents/041-glm-review-seats-openrouter.md)); oracle on
+  `opencode-go/deepseek-v4-pro:max` (037); orchestrator on its caller's model at `:max`
+  ([031](../decisions/subagents/031-orchestrator-model-inheritance.md)); main session per
+  `settings.json`. The z.ai subscription is gone; the `/fleet-model` toggle and
+  `~/.pi/fleet-model.json` override were deleted.
 - **Levels preserved as seat policy, then audited (2026-10-01):** orchestrator/oracle
   `:max`, implement/reviewers `:high`, scouts/compaction `:low`. `medium` does not exist
   on this model — the catalogue maps it to null and pi clamps it up to `high` — so the
@@ -147,21 +155,27 @@ GLM per-effort comparisons (see [decision 021](../decisions/subagents/021-effort
 
 ## What this means for current assignments
 
-1. **All seats — `opencode-go/deepseek-v4.1-flash` (decision 022; OpenCode Go routing 036).** Effort per seat
-   via the `provider/model:level` shorthand: implement/reviewers `:high`,
-   scouts and compaction `:low`, orchestrator/oracle `:max`. Do not raise
-   implement/reviewers toward max — the vendor data says the 60–80 band recovers
-   most of max at <half the tokens; `low` is scoped to read-only/summarization seats.
-2. **Orchestrator — `opencode-go/deepseek-v4.1-flash:max`.** 021's max-for-the-hard-tail
-   call carries over: the seat owns planning/instructions and the vendor card is
-   max-effort. 020's old "complexity is routed by model choice" line is dead —
-   there is one model now; the remaining dial is the effort suffix.
-3. **Oracle — `opencode-go/deepseek-v4.1-flash:max` (decision 022; OpenCode Go routing 036).** The 0813 record
-   (020) is superseded: v4.1-flash beats it on Codeforces (3471 vs 3348), MathArena
-   Apex (65.6 vs 65.3), DeepSWE (74.2 vs 62.7) and TB2.1 (90.6 vs 87.9), losing only
-   text-only HLE (39.1 vs 42.7); HLE-with-tools flips back (63.9 vs 60.0).
-4. **MiMo V2.5 Pro — nothing to set** (no effort control).
-5. **If GPT-5.6 Luna ever enters the fleet, run it at `high`** — the only
+1. **Implementer, scouts ×2, compaction — `opencode-go/deepseek-v4.1-flash`**
+   (decision 022; OpenCode Go routing 036): implementer `:high`, scouts `:low`,
+   compaction `:low`. Do not raise the implementer toward max — the vendor data says
+   the 60–80 band recovers most of max at <half the tokens; `low` is scoped to
+   read-only/summarization seats.
+2. **Reviewers ×3 — `openrouter/z-ai/glm-5.3-flash:high`** (provider moved 2026-10-22,
+   decision 041: off OpenCode Go extra-usage billing, same model; route pinned to
+   Z.AI first-party). Zhipu lab since 037, so decorrelated from the DeepSeek
+   implementer; `:high` stands on 021's flash high-vs-max token/quality delta.
+3. **Oracle — `opencode-go/deepseek-v4-pro:max`** (decision 037, 2026-10-18): the only
+   solid math/algo row on the Go menu (LCB 93.5, IMO 89.8).
+4. **Orchestrator — inherits its caller's model at `:max`** (decision 031). Its
+   frontmatter `opencode-go/deepseek-v4.1-flash:max` is the **level donor and the
+   no-caller-model fallback only**, not an assignment — the `INHERITING_AGENT` branch
+   in `extensions/subagent-async/index.ts` wins at spawn. 021's max-for-the-hard-tail
+   call carries over: the seat owns planning/instructions.
+5. **Main session — whatever `settings.json` says**
+   (`defaultProvider`/`defaultModel`/`defaultThinkingLevel`; owner-flipped, 038). It is
+   the caller whose model the orchestrator inherits, not a fleet constant.
+6. **MiMo V2.5 Pro — nothing to set** (no effort control).
+7. **If GPT-5.6 Luna ever enters the fleet, run it at `high`** — the only
    fully-quantified sweet spot (90% quality / 42% tokens / 43% cost).
 
 ## Caveats
