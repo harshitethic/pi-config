@@ -20,6 +20,8 @@ Read relevant docs before implementing a feature or change. Keep docs up to date
 
 **Fix stale docs found while tracing a ruling.** A doc that states a point a later ruling changed, without a superseded note citing the *most recent* owner ruling that changes it, gets fixed then. A decision record keeps its original ruling and gains the superseded note; a design doc is rewritten to the current ruling, or deleted if redundant.
 
+**Read current behaviour from the forward docs.** A brief or answer cites the design-doc section that states a behaviour, not a bare decision record: a decision says why it was chosen, and only its newest supersession note says what replaced it.
+
 ## Testing
 
 **Green before handoff.** The shared mainline is green, so a failing build or test is yours to investigate and fix — run the project's build + test suite before handing work off, and never leave a red state behind.
