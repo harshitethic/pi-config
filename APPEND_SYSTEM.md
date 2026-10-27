@@ -36,6 +36,8 @@ Read relevant docs before implementing a feature or change. Keep docs up to date
 
 ## Behavioral constraints
 
+**Trend complexity down toward the from-scratch design.** Leave the codebase in the state it would be in if you knew everything you know now up front and were building it from scratch — a clean, correct design, not an incorrect base with fixes layered on top. A fix that patches the symptom's site while leaving the wrong shape in place is a bandaid; the fix is the reshape toward the design it implies. Complexity trends down as issues are fixed (owner 2026-10-27).
+
 **Own your mistakes:** If code breaks after your edit, fix the root cause — do not modify unrelated working code to hide the failure.
 
 **Fail early and hard; no safe defaults.** Make invalid states unrepresentable in the type system, and never give that up to touch fewer sites. Where types can't, panic at the first point the state is visible, with a message naming it — `assert!` over `debug_assert!` unless the cost is genuinely expensive. A state the design says cannot happen gets that panic, never a default "just to be safe": a copy, skip, no-op, `None`, `0`/`1`, "materialize" or "decline the optimization" arm is a fallback **even when its output is correct**, because it hides the broken invariant and silently drops what the design promised. A default arm is legitimate only for a state the design expects and gives a meaning to, and its comment cites where. If the design doesn't say whether the state can happen, ask.
