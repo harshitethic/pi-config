@@ -47,6 +47,7 @@ date: 2026-07-14
 | 038 | Main session → `opencode-go/glm-5.3-flash` (meter-driven); multi-session orchestrator split | done |
 | 039 | Gates run the suite once (supersedes the ×2 convention) | done |
 | 040 | Refactor first: a preparatory refactor per work order, `REFACTOR FIRST` refusals, two-strikes area closure (owner only overrides) | done |
-| 041 | Review seats → `openrouter/z-ai/glm-5.3-flash:high` (off OpenCode Go extra-usage billing; model unchanged) | done |
+| 041 | Review seats → `openrouter/z-ai/glm-5.3-flash:high` (off OpenCode Go extra-usage billing; model unchanged) — **suspended 2026-10-28 by 044** | done |
 | 042 | OpenCode Go is a coupon: fill it with DeepSeek fleet traffic only; `xiaomi/mimo-v2.6-pro` routing preference pin | done |
 | 043 | Owner state by row id (`owner_asks` gate, `nextSteps` bar) + checkpoint recoverability (in-flight record, worktree lock/reap, four-state status) | done |
+| 044 | Review seats → `opencode-go/deepseek-v4.1-flash:high` (OpenRouter credits exhausted; 041 suspended, decorrelation loss named) | done |

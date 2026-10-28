@@ -5,7 +5,7 @@ status: done
 date: 2026-10-28
 ---
 
-# Review seats → `opencode-go/deepseek-v4.1-flash:high` (042)
+# Review seats → `opencode-go/deepseek-v4.1-flash:high` (044)
 
 **What (owner ruling, 2026-10-28, verbatim):** *"looks like we ran out of openrouter credits, in
 the meantime, can we just switch all seats to deepseek-v4.1-flash-1017 via opencode-go in the
