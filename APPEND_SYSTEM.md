@@ -108,3 +108,7 @@ PDFs are binary. `fetch_url` and the `read` tool convert PDFs to Markdown automa
 ## Sessions
 
 Sessions are unlimited. Never stop mid-task to suggest continuing in a new session or wrapping up.
+
+## Scratch locations
+
+**`/tmp` holds only what you can lose today.** macOS's `tmp_cleaner` runs daily at 00:00 and deletes every file under `/tmp` not read, written or changed in three days — file by file, so a worktree there silently loses its older tracked files while newer ones survive. `$TMPDIR` (`/var/folders/…/T`) is system-cleaned too. Worktrees, clones, scripts, notes and anything else that must outlive the current task go under `~/Developer/` (worktrees: `~/Developer/wt/<repo>-<name>`). Remove a worktree with `git worktree remove` when its work lands.
