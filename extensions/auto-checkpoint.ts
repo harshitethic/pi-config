@@ -73,6 +73,7 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 import { ReadTracker, formatRanges } from "./lib/read-tracking.ts";
 
 // ---------------------------------------------------------------------------
@@ -427,7 +428,7 @@ function ensureModel(ctx: ExtensionContext, config: AutoCheckpointConfig): Model
 }
 
 /** Run the idle check and compact when everything still holds at fire time. */
-function fireIdleCompaction(ctx: ExtensionContext): void {
+function fireIdleCompaction(pi: ExtensionAPI, ctx: ExtensionContext): void {
 	if (!state.config || !state.model) return;
 
 	// Re-check at fire time: the timer can land in the same instant as a new
@@ -438,11 +439,19 @@ function fireIdleCompaction(ctx: ExtensionContext): void {
 	if (!usage || usage.tokens === null) return;
 	if (usage.tokens < state.threshold) return;
 
+	const mcfg = resolveModelConfig(state.model, state.config);
+
+	const tokens = usage.tokens;
+	const idleMinutes = Math.round(idleCompactDelayMs(mcfg.cacheTtlMs) / 60_000);
+	const percent = usage.percent ?? Math.round((tokens / usage.contextWindow) * 100);
+
 	// The summarization read is the only request that must see the whole
 	// context; compacting before the cache expires keeps it at cache-read price.
 	ctx.compact({
 		onComplete: () => {
-			if (ctx.hasUI) ctx.ui.notify("Compacted while idle — next prompt starts from the summary.", "info");
+			// Durable, TUI-only (pi.appendEntry never enters LLM context): a
+			// toast is useless here because the user is by definition away.
+			pi.appendEntry("auto-checkpoint", { tokens, percent, idleMinutes });
 		},
 		onError: (error: Error) => {
 			if (ctx.hasUI) ctx.ui.notify(`Idle compaction failed: ${error.message}`, "error");
@@ -451,7 +460,7 @@ function fireIdleCompaction(ctx: ExtensionContext): void {
 }
 
 /** Arm the idle-compaction timer for a settled session. */
-function armIdleCompaction(ctx: ExtensionContext): void {
+function armIdleCompaction(pi: ExtensionAPI, ctx: ExtensionContext): void {
 	clearIdleTimer();
 	if (!state.config || !state.model) return;
 
@@ -469,7 +478,7 @@ function armIdleCompaction(ctx: ExtensionContext): void {
 
 	const timer = setTimeout(() => {
 		state.idleTimer = null;
-		fireIdleCompaction(ctx);
+		fireIdleCompaction(pi, ctx);
 	}, delay);
 	// Don't hold the process open (print/RPC modes must still exit).
 	(timer as { unref?: () => void }).unref?.();
@@ -481,6 +490,20 @@ function armIdleCompaction(ctx: ExtensionContext): void {
 // ---------------------------------------------------------------------------
 
 export default function (pi: ExtensionAPI) {
+	// --- transcript marker for an idle compaction (never enters LLM context) ---
+	pi.registerEntryRenderer<{ tokens: number; percent: number; idleMinutes: number }>(
+		"auto-checkpoint",
+		(entry, _options, theme) => {
+			const { tokens, percent, idleMinutes } = entry.data ?? { tokens: 0, percent: 0, idleMinutes: 0 };
+			return new Text(
+				`compacted while idle — ${tokens.toLocaleString()} tokens (${percent}%) after ${idleMinutes} min idle`,
+				1,
+				1,
+				(text) => theme.fg("muted", text),
+			);
+		},
+	);
+
 	// --- session_start: load config, reset state for fresh session ---
 	pi.on("session_start", async (_event, ctx) => {
 		state.config = await loadConfig(ctx.cwd);
@@ -597,7 +620,7 @@ export default function (pi: ExtensionAPI) {
 	pi.on("agent_settled", async (_event, ctx) => {
 		if (!state.config) return;
 		if (!ensureModel(ctx, state.config)) return;
-		armIdleCompaction(ctx);
+		armIdleCompaction(pi, ctx);
 	});
 
 	// --- /checkpoint-status command: show current config & context ---

@@ -35,6 +35,17 @@ the cache is DeepSeek's with no added guarantee). "Usually hours" is not "always
 more than an hour", so DeepSeek runs the 1 h default too. Do not raise it
 without evidence of a floor.
 
+**What the user sees.** pi already renders compaction itself: a
+`Compacting context…` status indicator (with the interrupt hint), then the
+transcript rebuilt around the compaction summary block. That covers "it
+happened", not "it happened while you were away". Idle compaction therefore
+writes a durable, TUI-only marker on completion — `pi.appendEntry` plus a
+`registerEntryRenderer`, which never enters LLM context — reading
+`compacted while idle — 312,400 tokens (29.8%) after 54 min idle`. A toast
+(`ui.notify`) is useless for this: by definition the user is not watching. The
+idle path is the only place a marker is added; threshold/overflow/`/compact`
+compaction keeps pi's own presentation.
+
 **Why before expiry.** The summarization request is the one call that must read
 the entire context; before expiry it reads at cache-read price, after expiry at
 the full input price — the exact cost the feature exists to avoid. Compacting

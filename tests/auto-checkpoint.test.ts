@@ -216,6 +216,7 @@ describe("arming self-heal on turn_end", () => {
 				handlers.set(event, handler);
 			},
 			registerCommand() {},
+			registerEntryRenderer() {},
 			sendMessage(message: any, options: any) {
 				sentMessages.push({ message, options });
 			},
@@ -364,6 +365,7 @@ describe("idleCompactDelayMs", () => {
 describe("idle compaction", () => {
 	let dir: string;
 	const handlers = new Map<string, (event: any, ctx: any) => Promise<any> | any>();
+	const entries: Array<{ customType: string; data: any }> = [];
 	// A neutral id: per-model entries in the developer's live
 	// ~/.pi/agent/auto-checkpoint.json must not reach these assertions.
 	const model = { id: "idle-test/model", contextWindow: 1_048_576 };
@@ -378,6 +380,10 @@ describe("idle compaction", () => {
 				handlers.set(event, handler);
 			},
 			registerCommand() {},
+			registerEntryRenderer() {},
+			appendEntry(customType: string, data: any) {
+				entries.push({ customType, data });
+			},
 			sendMessage() {},
 		} as any);
 	});
@@ -413,11 +419,20 @@ describe("idle compaction", () => {
 
 	it("compacts once after an idle settle when above the threshold", async () => {
 		await start(base);
+		entries.length = 0;
 		const { ctx, calls } = idleCtx();
 		await handlers.get("agent_settled")!({ type: "agent_settled" }, ctx);
 		expect(calls.length).toBe(0); // not before the idle delay
 		await sleep(TTL_MS * 4);
 		expect(calls.length).toBe(1);
+
+		// The TUI marker is written on completion (pi.appendEntry, TUI-only, not
+		// in LLM context) so the user sees what happened when they come back.
+		calls[0].onComplete();
+		expect(entries.length).toBe(1);
+		expect(entries[0].customType).toBe("auto-checkpoint");
+		expect(entries[0].data).toMatchObject({ tokens: 300_000, percent: 28.6 });
+		expect(typeof entries[0].data.idleMinutes).toBe("number");
 	});
 
 	it("does not compact below the threshold", async () => {
