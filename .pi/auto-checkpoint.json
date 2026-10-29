@@ -3,8 +3,5 @@
   "cooldownTurns": 3,
   "cooldownMs": 30000,
   "idleCompaction": true,
-  "cacheTtlMs": 300000,
-  "models": {
-    "deepseek*": { "threshold": 256000, "cacheTtlMs": 10800000 }
-  }
+  "cacheTtlMs": 3600000
 }

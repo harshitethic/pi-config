@@ -15,7 +15,14 @@ import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { resolveThreshold, matchPattern, idleCompactDelayMs, default as loadExtension } from "../extensions/auto-checkpoint";
+import {
+	resolveThreshold,
+	resolveModelConfig,
+	matchPattern,
+	matchModel,
+	idleCompactDelayMs,
+	default as loadExtension,
+} from "../extensions/auto-checkpoint";
 
 // ---------------------------------------------------------------------------
 // resolveThreshold
@@ -27,6 +34,8 @@ describe("resolveThreshold", () => {
 		smallWindowFraction: 0.8,
 		cooldownTurns: 3,
 		cooldownMs: 30_000,
+		idleCompaction: true,
+		cacheTtlMs: 60 * 60_000,
 		models: {},
 		prompt: "x",
 		defaultContextDegradation: true,
@@ -80,6 +89,99 @@ describe("matchPattern", () => {
 		expect(matchPattern("deepseek/*", "openai/gpt-5")).toBe(false);
 		expect(matchPattern("deepseek/deepseek-v4-flash-??31", "deepseek/deepseek-v4-flash-0731")).toBe(true);
 		expect(matchPattern("anthropic/claude-sonnet-*", "Anthropic/Claude-Sonnet-4")).toBe(true);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Model identification: one pattern must cover every route and every version
+// ---------------------------------------------------------------------------
+
+describe("matchModel", () => {
+	// The same model, as three routes spell it.
+	const go = { id: "deepseek-v4.1-flash", provider: "opencode-go" };
+	const openrouter = { id: "deepseek/deepseek-v4.1-flash", provider: "openrouter" };
+	const zai = { id: "glm-5.3-flash", provider: "z.ai" };
+
+	it("matches a family token through any route and version", () => {
+		for (const m of [go, openrouter, { id: "deepseek-v5-pro", provider: "z.ai" }]) {
+			expect(matchModel("deepseek*", m)).toBe(true);
+			expect(matchModel("*deepseek*", m)).toBe(true);
+		}
+		expect(matchModel("deepseek*", zai)).toBe(false);
+	});
+
+	it("matches provider-qualified patterns", () => {
+		expect(matchModel("opencode-go/*", go)).toBe(true);
+		expect(matchModel("openrouter/*", openrouter)).toBe(true);
+		expect(matchModel("openrouter/*", go)).toBe(false);
+		expect(matchModel("*/glm-*", zai)).toBe(true);
+	});
+
+	it("still accepts a bare id string (provider unknown)", () => {
+		expect(matchModel("deepseek*", "deepseek-v4.1-flash")).toBe(true);
+		expect(matchModel("opencode-go/*", "deepseek-v4.1-flash")).toBe(false);
+	});
+});
+
+describe("resolveModelConfig identity + family TTL", () => {
+	const base = {
+		defaultThreshold: 256000,
+		smallWindowFraction: 0.8,
+		cooldownTurns: 3,
+		cooldownMs: 30_000,
+		idleCompaction: true,
+		cacheTtlMs: 60 * 60_000,
+		models: {},
+		prompt: "x",
+		defaultContextDegradation: true,
+	};
+	const HOUR = 60 * 60_000;
+
+	it("a documented family keeps its TTL through every route and version", () => {
+		for (const m of [
+			{ id: "deepseek-v4.1-flash", provider: "opencode-go" },
+			{ id: "deepseek/deepseek-v4-pro", provider: "openrouter" },
+			{ id: "deepseek-v5", provider: "z.ai" },
+		]) {
+			expect(resolveModelConfig(m, base).cacheTtlMs).toBe(3 * HOUR);
+		}
+		for (const m of [
+			{ id: "claude-opus-4-7", provider: "anthropic" },
+			{ id: "anthropic/claude-sonnet-5", provider: "openrouter" },
+		]) {
+			expect(resolveModelConfig(m, base).cacheTtlMs).toBe(5 * 60_000);
+		}
+	});
+
+	it("an undocumented family falls back to the 1 h assumption", () => {
+		// z.ai and MiMo publish no TTL; luckily a wrong guess is not silent —
+		// /checkpoint-status prints the resolved delay and TTL.
+		expect(resolveModelConfig({ id: "glm-5.3-flash", provider: "z.ai" }, base).cacheTtlMs).toBe(HOUR);
+		expect(resolveModelConfig({ id: "MiMo-V2.6-Pro", provider: "opencode-go" }, base).cacheTtlMs).toBe(HOUR);
+		expect(resolveModelConfig({ id: "some-new-model", provider: "somewhere" }, base).cacheTtlMs).toBe(HOUR);
+	});
+
+	it("a config entry beats the family default, provider-qualified or bare", () => {
+		const cfg = {
+			...base,
+			models: {
+				"opencode-go/deepseek*": { threshold: 1000, cacheTtlMs: 10 * HOUR },
+				"openrouter/*": { threshold: 1000, cacheTtlMs: 24 * HOUR },
+			},
+		};
+		expect(resolveModelConfig({ id: "deepseek-v4.1-flash", provider: "opencode-go" }, cfg).cacheTtlMs)
+			.toBe(10 * HOUR);
+		expect(resolveModelConfig({ id: "deepseek/deepseek-v4-pro", provider: "openrouter" }, cfg).cacheTtlMs)
+			.toBe(24 * HOUR);
+		// z.ai is not covered by either entry → family/unknown path.
+		expect(resolveModelConfig({ id: "glm-5.3-flash", provider: "z.ai" }, cfg).cacheTtlMs).toBe(HOUR);
+	});
+
+	it("thresholds follow the same identity rule", () => {
+		const cfg = { ...base, models: { "opencode-go/*": { threshold: 0.5 } } };
+		expect(resolveThreshold({ id: "deepseek-v4.1-flash", provider: "opencode-go" }, 200_000, cfg)).toBe(100_000);
+		// Not covered by the entry → default 256000, capped to 0.8 × 200000.
+		expect(resolveThreshold({ id: "deepseek-v4.1-flash", provider: "openrouter" }, 200_000, cfg)).toBe(160_000);
 	});
 });
 
@@ -202,7 +304,8 @@ describe("arming self-heal on turn_end", () => {
 
 	it("includes read regions tracked from tool_result", async () => {
 		await freshSession();
-		handlers.get("tool_result")!(
+		// ReadTracker stats the file, so recording is async.
+		await handlers.get("tool_result")!(
 			{ type: "tool_result", toolName: "read", isError: false, input: { path: "src/foo.ts", offset: 10, limit: 5 } },
 			overThreshold(),
 		);

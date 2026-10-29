@@ -29,25 +29,30 @@
  *     "cooldownTurns": 3,                // min turns between nudges
  *     "cooldownMs": 30000,               // min ms between nudges
  *     "idleCompaction": true,            // compact a settled session after idle
- *     "cacheTtlMs": 300000,              // provider prompt-cache lifetime (Anthropic default 5 min)
+ *     "cacheTtlMs": 3600000,             // assumed cache lifetime for an unknown family (1 h)
  *     "prompt": "**Context note:** ...",  // optional, overrides degradation auto-pick
  *     "defaultContextDegradation": true,  // default for models without explicit setting
  *     "models": {
- *       "deepseek/*": { "threshold": 0.8, "cooldownTurns": 5, "cacheTtlMs": 10800000 },
- *       "openai/*":    { "threshold": 0.7 },
- *       "z.ai/glm-5.2": {
+ *       "deepseek*":   { "threshold": 0.8, "cooldownTurns": 5 },   // any route, any version
+ *       "openrouter/openai/*": { "threshold": 0.7 },
+ *       "z.ai/*":      { "cacheTtlMs": 10800000 },
+ *       "glm-5.2": {
  *         "threshold": 0.85,
  *         "contextDegradation": false   // relaxed prompt, no urgency
  *       }
  *     }
  *   }
  *
+ * Patterns match `model.id` and `provider/model.id` (`*`, `?` wildcards,
+ * case-insensitive, first match wins), so `deepseek*` covers
+ * `deepseek-v4.1-flash` through opencode-go and `deepseek/deepseek-v4-pro`
+ * through openrouter, and `opencode-go/*` or `z.ai/*` scope a whole route.
+ *
  * Thresholds (default and per-model): < 1 is a fraction of contextWindow,
  * >= 1 is an absolute token count. An absolute threshold that would exceed
  * smallWindowFraction × contextWindow (default 0.8) is capped to that value, so
  * small-window models still get nudged rather than never firing. Fractional
- * thresholds are uncapped. Model patterns support * and ? wildcards; first
- * match wins.
+ * thresholds are uncapped.
  *
  * When contextDegradation is false, the nudge prompt is relaxed — suggesting
  * the model wait for a logical completion point rather than urging a quick
@@ -57,14 +62,17 @@
  * cacheTtlMs is the provider's prompt-cache lifetime, not a pi setting: the
  * documented values differ by an order of magnitude (Anthropic 5 min, with a
  * 1 h option; DeepSeek disk cache "a few hours to a few days"; z.ai and MiMo
- * publish no TTL). `idleCompaction: false` or `cacheTtlMs: 0` turns the timer
- * off for a model whose cache outlives the session's usefulness.
+ * publish no TTL). `FAMILY_CACHE_TTL_MS` carries the documented families;
+ * everything else gets `cacheTtlMs` (1 h). `idleCompaction: false` or
+ * `cacheTtlMs: 0` turns the timer off for a model whose cache outlives the
+ * session's usefulness.
  */
 
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join, relative, resolve as resolvePath } from "node:path";
+import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { ReadTracker, formatRanges } from "./lib/read-tracking.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -145,9 +153,11 @@ const DEFAULT_CONFIG: AutoCheckpointConfig = {
 	cooldownTurns: 3,
 	cooldownMs: 30_000,
 	idleCompaction: true,
-	// Anthropic's default prompt-cache TTL. Other providers publish nothing
-	// (or, for DeepSeek, hours-to-days), so raise it per model where known.
-	cacheTtlMs: 5 * 60_000,
+	// Cache lifetime assumed for a family with no documented TTL. One hour sits
+	// between the documented extremes (Anthropic 5 min, DeepSeek hours-to-days)
+	// and is short enough that a normally-used session still compacts while its
+	// cache is warm. Documented families override this (FAMILY_CACHE_TTL_MS).
+	cacheTtlMs: 60 * 60_000,
 	models: {},
 	prompt: DEGRADATION_PROMPT,
 	defaultContextDegradation: true,
@@ -162,6 +172,28 @@ const GLOBAL_CONFIG_PATH = join(homedir(), ".pi", "agent", "auto-checkpoint.json
 export function matchPattern(pattern: string, s: string): boolean {
 	const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".");
 	return new RegExp("^" + escaped + "$", "i").test(s);
+}
+
+/**
+ * A model as pi identifies it: `id` is the provider's own name for it
+ * (`deepseek-v4.1-flash` through opencode-go, `deepseek/deepseek-v4.1-flash`
+ * through openrouter), `provider` is the route (`opencode-go`, `openrouter`,
+ * `z.ai`). Patterns are globs over either `id` or `provider/id`, so one entry
+ * covers every route for a model and every version of a family.
+ */
+export interface ModelIdentity {
+	id: string;
+	provider?: string;
+}
+
+function identityStrings(model: ModelIdentity | string): string[] {
+	if (typeof model === "string") return [model];
+	return model.provider ? [model.id, `${model.provider}/${model.id}`] : [model.id];
+}
+
+/** Glob match against the model id or its `provider/id` form. */
+export function matchModel(pattern: string, model: ModelIdentity | string): boolean {
+	return identityStrings(model).some((identity) => matchPattern(pattern, identity));
 }
 
 // ---------------------------------------------------------------------------
@@ -203,19 +235,44 @@ async function loadConfig(cwd: string): Promise<AutoCheckpointConfig> {
  *
  *  < 1 → fraction of contextWindow. >= 1 → absolute, capped at
  *  smallWindowFraction × contextWindow so small-window models still nudge. */
-export function resolveThreshold(modelId: string, contextWindow: number, config: AutoCheckpointConfig): number {
+export function resolveThreshold(
+	model: ModelIdentity | string,
+	contextWindow: number,
+	config: AutoCheckpointConfig,
+): number {
 	const cap = Math.round(config.smallWindowFraction * contextWindow);
 	const resolve = (threshold: number): number =>
 		threshold < 1 ? Math.round(threshold * contextWindow) : Math.min(threshold, cap);
 	for (const [pattern, mcfg] of Object.entries(config.models)) {
-		if (matchPattern(pattern, modelId)) return resolve(mcfg.threshold);
+		if (matchModel(pattern, model)) return resolve(mcfg.threshold);
 	}
 	return resolve(config.defaultThreshold);
 }
 
-/** Get resolved model-level config for cooldown/prompt/idle overrides. */
-function resolveModelConfig(
-	modelId: string,
+/**
+ * Documented prompt-cache lifetimes, keyed by family token so any version
+ * inherits its family's value with no config entry: `deepseek-v4.1-flash`,
+ * `deepseek/deepseek-v4-pro`, `z-ai/deepseek-v5` all match.
+ *
+ * Only documented values belong here. A wrong guess is worse than the 1 h
+ * default: assuming short compacts sessions whose cache was still warm, while
+ * assuming long can pay the full input price for the summary read.
+ */
+const FAMILY_CACHE_TTL_MS: ReadonlyArray<readonly [pattern: string, ttlMs: number]> = [
+	// "Cache ... will be automatically cleared, usually within a few hours to a
+	// few days." (api-docs.deepseek.com/guides/kv_cache) — the low end of that.
+	["*deepseek*", 3 * 60 * 60_000],
+	// Anthropic's default; 1 h only when the request asks for `ttl: "1h"`.
+	["*claude*", 5 * 60_000],
+	["*anthropic*", 5 * 60_000],
+];
+
+/**
+ * Resolved per-model config. Precedence for each field: an explicit `models`
+ * entry, then a documented family TTL, then the top-level setting.
+ */
+export function resolveModelConfig(
+	model: ModelIdentity | string,
 	config: AutoCheckpointConfig,
 ): {
 	cooldownTurns: number;
@@ -225,25 +282,15 @@ function resolveModelConfig(
 	idleCompaction: boolean;
 	cacheTtlMs: number;
 } {
-	for (const [pattern, mcfg] of Object.entries(config.models)) {
-		if (matchPattern(pattern, modelId)) {
-			return {
-				cooldownTurns: mcfg.cooldownTurns ?? config.cooldownTurns,
-				cooldownMs: mcfg.cooldownMs ?? config.cooldownMs,
-				explicitPrompt: mcfg.prompt ?? null,
-				contextDegradation: mcfg.contextDegradation ?? config.defaultContextDegradation,
-				idleCompaction: mcfg.idleCompaction ?? config.idleCompaction,
-				cacheTtlMs: mcfg.cacheTtlMs ?? config.cacheTtlMs,
-			};
-		}
-	}
+	const entry = Object.entries(config.models).find(([pattern]) => matchModel(pattern, model))?.[1];
+	const familyTtl = FAMILY_CACHE_TTL_MS.find(([pattern]) => matchModel(pattern, model))?.[1];
 	return {
-		cooldownTurns: config.cooldownTurns,
-		cooldownMs: config.cooldownMs,
-		explicitPrompt: null,
-		contextDegradation: config.defaultContextDegradation,
-		idleCompaction: config.idleCompaction,
-		cacheTtlMs: config.cacheTtlMs,
+		cooldownTurns: entry?.cooldownTurns ?? config.cooldownTurns,
+		cooldownMs: entry?.cooldownMs ?? config.cooldownMs,
+		explicitPrompt: entry?.prompt ?? null,
+		contextDegradation: entry?.contextDegradation ?? config.defaultContextDegradation,
+		idleCompaction: entry?.idleCompaction ?? config.idleCompaction,
+		cacheTtlMs: entry?.cacheTtlMs ?? familyTtl ?? config.cacheTtlMs,
 	};
 }
 
@@ -258,50 +305,17 @@ interface PendingNudge {
 }
 
 // ---------------------------------------------------------------------------
-// Read-region tracking (shared format with checkpoint.ts)
+// Read-region tracking (shared with checkpoint.ts)
 // ---------------------------------------------------------------------------
 
-interface ReadRegion {
-	offset: number;
-	limit: number; // Number.MAX_SAFE_INTEGER means "read to end"
-}
+/** Files the model read this session, for the nudge's re-read hints. */
+const reads = new ReadTracker();
 
-/** Files read this session, keyed by normalized relative-to-cwd path. */
-const readRegions = new Map<string, ReadRegion[]>();
-
-function normalizePath(filePath: string, cwd: string): string {
-	const absolute = resolvePath(cwd, filePath);
-	const rel = relative(cwd, absolute);
-	return rel.startsWith("..") ? absolute : rel || ".";
-}
-
-function mergeRegions(regions: ReadRegion[]): Array<{ offset: number; endLine: number }> {
-	const sorted = regions
-		.map((r) => ({ offset: r.offset, endLine: r.offset + r.limit - 1 }))
-		.sort((a, b) => a.offset - b.offset);
-	const merged: Array<{ offset: number; endLine: number }> = [];
-	for (const r of sorted) {
-		const prev = merged[merged.length - 1];
-		if (prev && r.offset <= prev.endLine + 1) {
-			prev.endLine = Math.max(prev.endLine, r.endLine);
-		} else {
-			merged.push({ ...r });
-		}
-	}
-	return merged;
-}
-
-function formatReadRegions(readRegions: Map<string, ReadRegion[]>): string {
-	if (readRegions.size === 0) return "";
-	const entries: string[] = [];
-	for (const [path, regions] of readRegions) {
-		const merged = mergeRegions(regions);
-		const ranges = merged
-			.map((r) => (r.endLine >= Number.MAX_SAFE_INTEGER - 1 ? `L${r.offset}-end` : `L${r.offset}-${r.endLine}`))
-			.join(", ");
-		const fullFile = merged.length === 1 && merged[0].offset === 1 && merged[0].endLine >= Number.MAX_SAFE_INTEGER - 1;
-		entries.push(`- ${path}${fullFile ? " (entire file)" : ` → ${ranges}`}`);
-	}
+function formatReadRegions(tracker: ReadTracker): string {
+	if (tracker.size === 0) return "";
+	const entries = tracker
+		.fileSummaries()
+		.map(({ path, merged, wholeFile }) => `- ${path}${wholeFile ? " (entire file)" : ` → ${formatRanges(merged)}`}`);
 	return (
 		`\n\nFiles read this session:\n${entries.join("\n")}` +
 		`\n\nWhen checkpointing, include only files you're certain you'll need immediately in relevantPaths — ` +
@@ -310,12 +324,13 @@ function formatReadRegions(readRegions: Map<string, ReadRegion[]>): string {
 }
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
 
 const state: {
 	config: AutoCheckpointConfig | null;
-	modelId: string | null;
+	model: ModelIdentity | null;
 	threshold: number;
 	turnCounter: number;
 	lastNudgedTurn: number;
@@ -324,7 +339,7 @@ const state: {
 	idleTimer: ReturnType<typeof setTimeout> | null;
 } = {
 	config: null,
-	modelId: null,
+	model: null,
 	threshold: 0,
 	turnCounter: 0,
 	lastNudgedTurn: -1,
@@ -341,18 +356,23 @@ function clearIdleTimer(): void {
 
 function resetState(): void {
 	clearIdleTimer();
-	state.modelId = null;
+	state.model = null;
 	state.threshold = 0;
 	state.turnCounter = 0;
 	state.lastNudgedTurn = -1;
 	state.lastNudgedMs = -1;
 	state.pending = null;
-	readRegions.clear();
+	reads.clear();
 }
 
 /** Render the nudge text for a crossover, including tracked read regions. */
-function buildNudgeContent(tokens: number, contextWindow: number, percent: number, modelId: string): string {
-	const mcfg = resolveModelConfig(modelId, state.config!);
+function buildNudgeContent(
+	tokens: number,
+	contextWindow: number,
+	percent: number,
+	model: ModelIdentity,
+): string {
+	const mcfg = resolveModelConfig(model, state.config!);
 	// Pick the right built-in prompt based on degradation flag, unless an
 	// explicit prompt was configured (takes precedence).
 	const promptTemplate = mcfg.explicitPrompt
@@ -365,7 +385,7 @@ function buildNudgeContent(tokens: number, contextWindow: number, percent: numbe
 
 	// Append tracked read regions so the model can make informed
 	// relevantPaths decisions when calling the checkpoint tool.
-	content += formatReadRegions(readRegions);
+	content += formatReadRegions(reads);
 	return content;
 }
 
@@ -393,18 +413,18 @@ export function idleCompactDelayMs(ttlMs: number): number {
  * reliably current, so every handler that needs the threshold self-heals here.
  * Returns the model id to use, or null while no threshold is known.
  */
-function ensureModel(ctx: ExtensionContext, config: AutoCheckpointConfig): string | null {
+function ensureModel(ctx: ExtensionContext, config: AutoCheckpointConfig): ModelIdentity | null {
 	const currentModel = ctx.model;
-	if (currentModel?.id && (state.modelId !== currentModel.id || state.threshold <= 0)) {
-		state.modelId = currentModel.id;
-		state.threshold = resolveThreshold(currentModel.id, currentModel.contextWindow ?? 200_000, config);
+	if (currentModel?.id && (state.model?.id !== currentModel.id || state.threshold <= 0)) {
+		state.model = { id: currentModel.id, provider: currentModel.provider };
+		state.threshold = resolveThreshold(state.model, currentModel.contextWindow ?? 200_000, config);
 	}
-	return state.modelId !== null && state.threshold > 0 ? state.modelId : null;
+	return state.model !== null && state.threshold > 0 ? state.model : null;
 }
 
 /** Run the idle check and compact when everything still holds at fire time. */
 function fireIdleCompaction(ctx: ExtensionContext): void {
-	if (!state.config || !state.modelId) return;
+	if (!state.config || !state.model) return;
 
 	// Re-check at fire time: the timer can land in the same instant as a new
 	// prompt or a queued follow-up. Never compact under a live run.
@@ -429,7 +449,7 @@ function fireIdleCompaction(ctx: ExtensionContext): void {
 /** Arm the idle-compaction timer for a settled session. */
 function armIdleCompaction(ctx: ExtensionContext): void {
 	clearIdleTimer();
-	if (!state.config || !state.modelId) return;
+	if (!state.config || !state.model) return;
 
 	// Interactive sessions only. A subagent or RPC session is settled between
 	// commands its driver may issue at any moment; compacting under it would
@@ -437,7 +457,7 @@ function armIdleCompaction(ctx: ExtensionContext): void {
 	// interactive terminal session for the same reason).
 	if (ctx.mode !== "tui") return;
 
-	const mcfg = resolveModelConfig(state.modelId, state.config);
+	const mcfg = resolveModelConfig(state.model, state.config);
 	if (!mcfg.idleCompaction) return;
 
 	const delay = idleCompactDelayMs(mcfg.cacheTtlMs);
@@ -464,8 +484,8 @@ export default function (pi: ExtensionAPI) {
 
 		const model = ctx.model;
 		if (model && model.id) {
-			state.modelId = model.id;
-			state.threshold = resolveThreshold(model.id, model.contextWindow ?? 200_000, state.config);
+			state.model = { id: model.id, provider: model.provider };
+			state.threshold = resolveThreshold(state.model, model.contextWindow ?? 200_000, state.config);
 		}
 	});
 
@@ -474,8 +494,8 @@ export default function (pi: ExtensionAPI) {
 		if (!state.config) return;
 
 		resetState();
-		state.modelId = event.model.id;
-		state.threshold = resolveThreshold(event.model.id, event.model.contextWindow ?? 200_000, state.config);
+		state.model = { id: event.model.id, provider: event.model.provider };
+		state.threshold = resolveThreshold(state.model, event.model.contextWindow ?? 200_000, state.config);
 	});
 
 	// --- session_compact: context just got freed → clear nudge state & read tracking ---
@@ -492,8 +512,8 @@ export default function (pi: ExtensionAPI) {
 	pi.on("turn_end", async (event, ctx) => {
 		if (!state.config) return;
 
-		const modelId = ensureModel(ctx, state.config);
-		if (!modelId) return;
+		const model = ensureModel(ctx, state.config);
+		if (!model) return;
 
 		const usage = ctx.getContextUsage();
 		if (!usage || usage.tokens === null) return;
@@ -513,7 +533,7 @@ export default function (pi: ExtensionAPI) {
 		if (tokens < state.threshold) return;
 
 		// Cooldown: both turn count AND timer must have elapsed.
-		const mcfg = resolveModelConfig(modelId, state.config);
+		const mcfg = resolveModelConfig(model, state.config);
 		const turnsSinceLast = state.turnCounter - state.lastNudgedTurn;
 		const msSinceLast = state.lastNudgedMs < 0 ? Number.POSITIVE_INFINITY : Date.now() - state.lastNudgedMs;
 
@@ -527,7 +547,7 @@ export default function (pi: ExtensionAPI) {
 			pi.sendMessage(
 				{
 					customType: "auto-checkpoint",
-					content: buildNudgeContent(tokens, contextWindow, percent, modelId),
+					content: buildNudgeContent(tokens, contextWindow, percent, model),
 					display: false,
 				},
 				{ deliverAs: "steer" },
@@ -541,19 +561,9 @@ export default function (pi: ExtensionAPI) {
 
 	// --- tool_result: track read regions for nudge file hints ---
 	// `tool_execution_end` dropped its `args` field in current pi; the finalized
-	// tool arguments live on `tool_result.input`.
-	pi.on("tool_result", (event, ctx) => {
-		if (event.toolName !== "read" || event.isError) return;
-		const input = event.input as { path?: string; offset?: number; limit?: number };
-		const path = input.path;
-		if (!path) return;
-		const offset: number = input.offset ?? 1;
-		const limit: number = input.limit ?? Number.MAX_SAFE_INTEGER;
-
-		const key = normalizePath(path, ctx.cwd);
-		const regions = readRegions.get(key) ?? [];
-		regions.push({ offset, limit });
-		readRegions.set(key, regions);
+	// tool arguments arrive on `tool_result.input`.
+	pi.on("tool_result", async (event, ctx) => {
+		await reads.recordToolResult(event, ctx.cwd);
 	});
 
 	// --- before_agent_start: inject a nudge armed by the previous run's end ---
@@ -564,7 +574,7 @@ export default function (pi: ExtensionAPI) {
 		if (!state.config) return;
 
 		const { tokens, contextWindow, percent } = state.pending;
-		const content = buildNudgeContent(tokens, contextWindow, percent, state.modelId ?? ctx.model?.id ?? "");
+		const content = buildNudgeContent(tokens, contextWindow, percent, state.model ?? ctx.model ?? { id: "" });
 
 		state.lastNudgedTurn = state.turnCounter;
 		state.lastNudgedMs = Date.now();
@@ -590,12 +600,11 @@ export default function (pi: ExtensionAPI) {
 	pi.registerCommand("checkpoint-status", {
 		description: "Show auto-checkpoint configuration and current context usage.",
 		async handler(_args, ctx) {
-			const model = ctx.model;
-			const modelId = model?.id ?? "no-model";
+			const model = ctx.model ? { id: ctx.model.id, provider: ctx.model.provider } : { id: "no-model" };
 
 			const lines: string[] = [
 				"─── Auto-Checkpoint ───",
-				`model: ${modelId}`,
+				`model: ${model.provider ? `${model.provider}/${model.id}` : model.id}`,
 			];
 
 			if (state.config) {
@@ -603,9 +612,9 @@ export default function (pi: ExtensionAPI) {
 				const effectiveThreshold =
 					state.threshold > 0
 						? state.threshold
-						: resolveThreshold(modelId, model?.contextWindow ?? 200_000, state.config);
+						: resolveThreshold(model, ctx.model?.contextWindow ?? 200_000, state.config);
 
-				const mcfg = resolveModelConfig(modelId, state.config);
+				const mcfg = resolveModelConfig(model, state.config);
 				lines.push(`threshold: ${effectiveThreshold.toLocaleString()} tokens`);
 				lines.push(`cooldown: ${mcfg.cooldownTurns} turns / ${(mcfg.cooldownMs / 1000).toFixed(0)}s`);
 				lines.push(`context degradation: ${mcfg.contextDegradation}`);
