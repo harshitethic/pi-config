@@ -33,7 +33,7 @@
  *     "prompt": "**Context note:** ...",  // optional, overrides degradation auto-pick
  *     "defaultContextDegradation": true,  // default for models without explicit setting
  *     "models": {
- *       "deepseek/*": { "threshold": 0.8, "cooldownTurns": 5, "cacheTtlMs": 21600000 },
+ *       "deepseek/*": { "threshold": 0.8, "cooldownTurns": 5, "cacheTtlMs": 10800000 },
  *       "openai/*":    { "threshold": 0.7 },
  *       "z.ai/glm-5.2": {
  *         "threshold": 0.85,
@@ -406,8 +406,8 @@ function ensureModel(ctx: ExtensionContext, config: AutoCheckpointConfig): strin
 function fireIdleCompaction(ctx: ExtensionContext): void {
 	if (!state.config || !state.modelId) return;
 
-	// Re-check at fire time: the timer is armed when a run settles, and one
-	// request may have happened since (steer, follow-up, retry).
+	// Re-check at fire time: the timer can land in the same instant as a new
+	// prompt or a queued follow-up. Never compact under a live run.
 	if (!ctx.isIdle() || ctx.hasPendingMessages()) return;
 
 	const usage = ctx.getContextUsage();
