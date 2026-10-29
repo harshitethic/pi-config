@@ -96,7 +96,7 @@ for pkg in pi-coding-agent pi-agent-core pi-ai pi-tui; do
 done
 
 # typebox is a transitive dep of pi-coding-agent that some extensions
-# (e.g. todo.ts) value-import bare — `import { Type } from "typebox"`. Unlike
+# (e.g. checkpoint.ts) value-import bare — `import { Type } from "typebox"`. Unlike
 # the @earendil-works/* packages it lives at top-level node_modules (not under
 # a scope), so it needs a separate link target dir. Without it, tests that
 # import such extensions fail to resolve 'typebox'.

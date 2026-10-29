@@ -1,0 +1,44 @@
+---
+title: "Fleet model id → deepseek/deepseek-v4.1-flash-1017 (Oct 17 checkpoint refresh)"
+type: decision
+status: done
+date: 2026-10-18
+---
+
+# Fleet model id → `deepseek/deepseek-v4.1-flash-1017`
+
+**What:** Every DeepSeek seat moves from the 0910 id to the Oct 17 checkpoint: implement `:high`, orchestrator `:max`, oracle `:max`, scout-code/scout-web `:low`, scout-sweep `:low` (opencode-go provider), compaction and the no-frontmatter fallback via `FLEET_MODEL`. The `models.json` first-party routing pin (`only: ["deepseek"]`, no fallbacks) transfers from `deepseek/deepseek-v4.1-flash` to the new id. Seat split, effort levels, the MiMo reviewer experiment (023), and the orchestrator inheritance rule (031) are untouched. `_1017` is the vendor checkpoint suffix, not an effort manifest constant.
+
+**Why (owner directive, 2026-10-18):** switch the DeepSeek flash subagents to the new release. Independent of the directive, it is the right move on numbers: the vendor card shows the checkpoint advancing the same axes the fleet chose 022 on — Terminal-Bench 4.0 31.2→42.3 (Claude Code harness), DeepSWE v1.1 74.2→77.0 (Mini-SWE-V2), Apex Bench 64.6→72.1, HLE w/o tools 36.8→42.6, ProgramBench 20.3→29.1 — while reducing task time and output length (fewer tokens per agentic turn, i.e. cheaper per completed task). The effort presets are unchanged (`max`/`high`/`low`; still no `medium`, so pi's clamp behavior in 022's audit stands), pricing unchanged ($0.15/$0.60/M, cache read $0.003/M, weekday peak windows), context window unchanged (1M).
+
+**Alternatives rejected:**
+- **Wait for the pi.dev catalog to publish the row.** The store refresh (`checkedAt` Oct 18 on every provider) reports upstream `lastModified` Oct 15 — the snapshot predates the release, so waiting blocks the directive for a third-party lag. Hand-merge of the official model entry into `~/.pi/agent/models-store.json` lands now; it is superseded wholesale by the next real upstream refresh.
+- **Keep both ids pinned in `models.json`.** The old pin's purpose (022) is a correctness guard for the model the fleet runs; with no seat on the 0910 id it describes nothing. Transferred, not duplicated (022's precedent when moving the pin off 0813).
+
+> **Addendum (2026-10-18, owner ruling):** the cost tier (scout-sweep) stays on OpenCode Go's
+> DeepSeek V4.1 Flash deliberately — the saving is the Go plan's usage quota ($10/mo includes up
+> to $80/mo of list-price DS-Flash usage, weekly cap $40), not a token discount; per-token prices
+> match DeepSeek first-party's list. Sacrificing the -1017 id on this seat is accepted. Probe
+> results (`opencode.ai/inference/go/v1`): the gateway recognizes `deepseek-v4.1-flash-1017` but
+> answers "Model is unavailable" — listed, not served — and the old id's upstream currently
+> fails reproducibly with "Invalid credential" (three probes), so the seat is dead until OpenCode
+> Go fixes it; report to them if it persists. Because their DeepSeek upstream is a ZDR agreement
+> and DeepSeek's first-party `deepseek-flash` API name was upgraded in place to the 1017
+> checkpoint, the old id is expected to serve the new checkpoint automatically — do NOT flip
+> scout-sweep to the `-1017` slug; re-probe `deepseek-v4.1-flash` instead. The catalog hand-merge
+> stays in place but is dormant for this seat. **Update same day: `scout-sweep` deleted by owner** — it was an uncommitted
+> cost-tier twin of scout-code (identical body, OpenCode Go frontmatter); with it gone, the
+> OpenCode Go ruling above is dormant until a cost-tier seat exists again. **Superseded same day by [decision 036](036-fleet-opencode-go.md):**
+> the DeepSeek fleet itself moved to OpenCode Go (`opencode-go/deepseek-v4.1-flash`), so the
+> OpenCode Go routing is no longer a dormant cost-tier escape but the fleet's live route; the
+> `-1017` checkpoint stays reachable via OpenRouter for manual main-session use (pin kept).
+
+**Tradeoff:** one more hand-maintained pin plus one hand-merged catalog entry. When the upstream catalog catches up, `pi update --models` rewrites the merged entry from OpenRouter's live data (the merge is a stopgap against the store's own `lastModified` freshness signal, not a fork of it) — a later re-merge should only be needed if prices change upstream.
+
+## Rollback
+
+`git revert` of this commit restores the model lines, `FLEET_MODEL`, the test pins, and the `models.json` pin to the 0910 id.
+
+**Files changed:** `agents/{implement,orchestrator,math-algo-oracle,scout-code,scout-web,scout-sweep}.md` (model lines), `extensions/lib/fleet-model.ts`, `models.json`, `tests/subagent-model-inheritance.test.ts`, `README.md`, `docs/TODO.md`, `docs/thinking-levels.md`, `docs/model-role-scores.md` (incl. two pre-existing stale reviewer-seat sentences in the TL;DR table and the reviewer-detail paragraph, corrected here to the 023 state), decisions index, supersession footnote on 022, this decision.
+
+**Verification:** `bun test tests/subagent-model-inheritance.test.ts` (matrix re-pinned to `-1017`), plus a live spawn recording `deepseek/deepseek-v4.1-flash-1017:*` in its `meta.json` after `/reload`.

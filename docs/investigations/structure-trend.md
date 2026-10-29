@@ -1,13 +1,376 @@
 # Structure trend
 
 Chunk-boundary structural snapshot for this repo. Convention: `APPEND_SYSTEM.md`
-§Structural audits at chunk boundaries and
-`decisions/subagents/024-structural-growth-checks.md`. One entry per chunk
+§Refactor-needed register, `decisions/subagents/024-structural-growth-checks.md`
+and `040-refactor-first.md`. One entry per chunk
 landing, newest first, under two lenses — **growth** (file/function size deltas,
 candidate extractions) and **unification** (parallel mechanisms for one idea;
 files unrelated work items all had to touch). Delta-based — no absolute
 thresholds. Each audit runs as `scout-code` over the delta since the previous
-entry; the ranked candidates feed the next chunk's sequence before feature work.
+entry. Each growth or parallel-mechanism finding is a strike on its area in the register below;
+two strikes, or one `REFACTOR FIRST` refusal, close the area to feature work until its
+refactor lands.
+
+## Refactor-needed register
+
+| area | strikes (landing or refusal) | state | refactor |
+|---|---|---|---|
+| `extensions/{checkpoint,auto-checkpoint}` read tracking | 1 (2026-10-21) | open — one duplicate copy remains in `auto-checkpoint.ts` (blocked: another session's WIP, migration order pending owner ruling) | fold `auto-checkpoint.ts` onto `extensions/lib/read-tracking.ts` |
+| `extensions/checkpoint.ts` growth | 1 (2026-10-21) | **resolved 2026-10-21 by WO-2026-057** — the named extraction landed (901 → 818 lines; git/token helpers now in `extensions/lib/checkpoint-meta.ts`) | done |
+
+## 2026-10-22 — chunk: seat-config ruling batch (3bf7b2f, ff7a78f, 9833b88, 28f10c2, 2bbcae3)
+
+**Growth:** production delta small — `extensions/lib/fleet-model.ts` (one join exported),
+`compaction-model.ts`, `subagent-async/index.ts` (3 fallback arms); remainder is decisions/docs
+(21 files, +379/−51). No new extraction candidates; the batch *consumed* one — the provider-less
+`FLEET_MODEL` fallback copy is now a single `FLEET_MODEL_SPEC` join with two consumers.
+
+**Unification:** `models.json` touched by two landings (fidelity pin `ff7a78f`, mimo preference
+pin pending in 042) — both through the single override mechanism, no parallel path; the
+458-request bare-slug drift anomaly (seat audit 2026-10-22) is the closed proof case.
+No strikes.
+
+## 2026-10-21 — chunk: boundary-pin derivation (test-side only)
+
+Closes the two follow-ups parked in the spawn-env idiom entry below. Zero
+production change.
+
+**Pin.** `tests/subagent-boundary-hermeticity.test.ts` no longer names files;
+its header is the decision record.
+
+- Behavioral row: derived set — `*.test.*` files that spawn a child or import a
+  module reading `process.env.PI_SUBAGENT_*` / `PI_IS_SUBAGENT`, minus itself
+  and minus live-model files (`createAgentSession`); re-run as a child
+  `bun test` under a replicated harness injection. 24 files, 24–37 s (was 3
+  enumerated files, 6 s).
+- Static row: every spawn call site under `tests/` passes an explicit `env`
+  (inventory 11 files / 16 sites), plus a blindness guard so a mask that eats
+  code cannot pass vacuously.
+- Mutation-checked both ways: dropping a file's `scrubSubagentEnv()` reds the
+  behavioral row (child report in the message); dropping `env: childEnv()` from
+  `tests/e2e-checkpoint.test.ts:544` reds the static row at that line.
+- Rejected: whole-suite nested run (doubles the suite, +~150 s, and couples to
+  live rows); extending the enumerated `BOUNDARY_FILES` (one edit per new file,
+  and e2e-checkpoint is 82 s of live rows); static-only (blind to an in-process
+  observer with no spawn site — `work-order-policy-wiring.test.ts` is one);
+  spawn-wrapper funnel (restructures the 10 just-landed `childEnv()` sites).
+- The static row caught four straggler sites, now passing `env: childEnv()`:
+  `work-record-capture.test.ts:81,101`, `subagent-model-inheritance.test.ts:304`,
+  `subagent-id-resolution.test.ts:388`. No assertion changed.
+
+**Follow-up closed: `PI_SUBAGENT_WORKTREE` / `PI_SUBAGENT_PARENT_CWD` are a
+different class, so `SUBAGENT_ENV_VARS` stays the three gate vars.** One reader
+(`extensions/worktree-guard.ts:298-299`, at extension load inside a pi process),
+one writer that always overwrites both at spawn
+(`extensions/subagent-async/index.ts:1737-1745`, empty when unisolated), no test
+reading them from `process.env` (`tests/subagent-id-resolution.test.ts:669`
+asserts the builder's return; `extensions/worktree-guard.test.mjs` sets both
+itself in every wiring row), and no in-suite child or SDK session that loads the
+guard off an ambient value.
+
+Suite: 822 tests / 0 fail / 43 files bare and under injected `PI_SUBAGENT_*`
+(baseline in the same worktree 820/0; +2 rows — committed-tree counts; the main
+checkout reads +3 from another session's uncommitted `tests/auto-checkpoint.test.ts`
+rows). Flaky rows seen in both windows and at base:
+`apps/changelog-gen/src/cli.test.ts` (spawns `npx tsx`) — **fixed 2026-10-21 @
+52d2301 (gh #10)**: `runCli` spawns bun directly, and a fake-broken-npx
+regression pin guards the class; and the live-model e2e rows.
+
+### Growth
+
+| file | now | base | Δ |
+|---|---:|---:|---:|
+| `tests/subagent-boundary-hermeticity.test.ts` | 410 | 71 | +339 |
+| `tests/work-record-capture.test.ts` | — | — | +2/−1 |
+| `tests/subagent-model-inheritance.test.ts` | — | — | +2/−2 |
+| `tests/subagent-id-resolution.test.ts` | — | — | +2/−1 |
+
+Test-side growth only; no strike (production untouched).
+
+### Unification
+
+- One derivation (`walk` + `callSites`) feeds both rows, so "spawn-capable" is
+defined once; no second env helper, no per-file list.
+- Watch: the static row is a hand-rolled scanner living in a test file. A third
+consumer (e.g. rejected option D's import restriction) extracts it into
+`tests/helpers/` — do not copy it.
+
+## 2026-10-21 — chunk: spawn-env idiom adoption (`d068989`, merged `5b8c429`)
+
+1 commit + 1 merge, 3 test files (+39/−4), `review_policy: skip` with the
+orchestrator reviewing the diff: the two hermeticity follow-ups parked in the
+058+059 entry. `sh()` in `tests/e2e-checkpoint.test.ts` now passes
+`env: childEnv()` (the real trip-wire: a no-env `spawnSync` hands children bun's
+startup snapshot, so an in-process scrub never reaches them), and
+`tests/peer-link-external.test.ts` / `tests/peer-link-smoke.ts` adopt
+`childEnv(overrides)`. Dispatch premise correction: neither file had a scrub at
+all (the order assumed e2e-checkpoint did) — file-level `scrubSubagentEnv()`
+added to both, module-top for the smoke script (scripts have no bun hooks).
+Suite verified on the merge: 823 tests / 0 fail / 43 files bare AND under
+injected `PI_SUBAGENT_*` (the implementer measured 820/0 in its fresh worktree
+— 3 tests/25 expects short of main: the other session's uncommitted
+`tests/auto-checkpoint.test.ts` adds 3 rows a fresh worktree does not carry;
+before == after either way). No assertion changed.
+
+### Growth
+
+| file | Δ |
+|---|---:|
+| `tests/e2e-checkpoint.test.ts` | +15/−1 |
+| `tests/peer-link-external.test.ts` | +17/−2 |
+| `tests/peer-link-smoke.ts` | +7/−1 |
+
+Test-side only; no strike (production untouched).
+
+### Unification
+
+- One spawn-env idiom (`childEnv`/`scrubSubagentEnv`) now covers every spawn
+  site the register knows; no second scrub/env helper.
+- Follow-ups parked here (not register rows): the boundary pin
+  (`tests/subagent-boundary-hermeticity.test.ts` `BOUNDARY_FILES`) still lists
+  only the original three files, so the adopted sites have no regression row —
+  and extending it with `tests/e2e-checkpoint.test.ts` would couple the pin to
+  that file's live-model rows (flaky for a hermeticity pin); decide
+  behavioral-vs-static pin in a dedicated tiny order. And
+  `extensions/worktree-guard.ts:298-299` reads `PI_SUBAGENT_WORKTREE` /
+  `PI_SUBAGENT_PARENT_CWD`, which `SUBAGENT_ENV_VARS` omits — different class
+  (harness worktree plumbing, not gate env); check whether tests need those
+  covered.
+  **Both closed 2026-10-21** (entry above): the pin derives its file set, and
+  the guard pair is confirmed a different class — the scrub set stays the three
+  gate vars.
+
+## 2026-10-21 — chunk: WO-2026-058 + WO-2026-059 test-infra pair (`a23e6d3..d03af90`)
+
+Two test-side orders landed in one window (suite 823/0 bare and 823/0 under
+harness-style injection at `d03af90` — verdict now invariant to invocation
+context, pi-config#9). 058: boundary rows control the `PI_SUBAGENT_*` env they
+exercise via `tests/helpers/subagent-env.ts`; KNOWN-BUG pin row flipped
+positive; mutation-checked (removing the scrubs reds the pin). 059: the parked
+git-hang row — `runGit`'s `execFile` timeout pinned by a discriminating row,
+mutation-checked both ways (option dropped → row reds on its witness; restored
+→ green). Zero production change in both (059: `extensions/lib/checkpoint-meta.ts`
+byte-identical). Reviews: 058 both APPROVED_WITH_NOTES (1 round), 059
+APPROVED/APPROVED (1 + 2 rounds); LOWs accepted. Excluded as before: another
+session's uncommitted `auto-checkpoint.ts` + `settings.json` +
+`tests/auto-checkpoint.test.ts` + `decisions/settings/**`.
+
+### Growth
+
+| file | now | base | Δ |
+|---|---:|---:|---:|
+| `tests/helpers/subagent-env.ts` | 55 | — | +55 (new) |
+| `tests/subagent-env.test.ts` | 101 | — | +101 (new) |
+| `tests/checkpoint-meta.test.ts` | 161 | — | +161 (new) |
+| 7 adopted test files | — | — | net +93/−73 (scrub lines only; no assertion changed) |
+
+Test-side growth only; no strike (production untouched).
+
+### Unification
+
+- Three hand-rolled `PI_SUBAGENT_*` scrub copies (`owner-asks`, `session-log`,
+  `subagent-nesting`) folded into the one helper, and the new sites adopt it —
+  one scrub mechanism repo-wide, which is what made "no third copy" true.
+- One spawn-env idiom (`childEnv`) with the Bun startup-snapshot quirk pinned
+  in one place. Both orders' implementers probed the quirk independently and
+  agreed: it bites *sync* spawns only; async `execFile` sees live `process.env`.
+- No parallel paths introduced (one shim fixture, one witness helper, no second
+  harness).
+- Reviewer seats (023): verdicts matched the diffs on gate inspection; one
+  reviewer remark was wrong on branch ancestry (the implementer corrected it) —
+  data point for the seat call.
+- Follow-ups parked here (not register rows): `tests/e2e-checkpoint.test.ts:530`
+  spawns without explicit env — **done 2026-10-21** (spawn-env idiom adoption
+  chunk, below), `tests/peer-link-external.test.ts:41` +
+  `tests/peer-link-smoke.ts:28` adopt `childEnv()` — **done 2026-10-21** (same
+  chunk), bun 1.3.11 `execFileSync`-under-`bun test` stderr leak (test-log
+  noise; upstream quirk — parked: not ours to scrub), and the still-parked
+  `tsc --noEmit` step.
+
+## 2026-10-21 — chunk: WO-2026-057 lib extraction (`981d3aa..0886a9f`)
+
+1 commit + 1 merge (bug-triage's `subagent-boundary-hermeticity` pin row merged
+alongside), 2 files: the register's named refactor — `runGit`,
+`captureGitBinding`, `tokensBefore`, `renderTokenDelta`, `recordTokensAfter`,
+`metaPathFor`, `GitBinding`, `CheckpointTokens` moved verbatim from
+`extensions/checkpoint.ts` to `extensions/lib/checkpoint-meta.ts`. Zero test
+edits; suite 814/0. Reviews: review-code APPROVED, review-tests
+APPROVED_WITH_NOTES (2 LOW, accepted).
+
+### Growth
+
+| file | now | base (WO-2026-056) | Δ |
+|---|---:|---:|---:|
+| `extensions/checkpoint.ts` | 818 | 901 | −83 |
+| `extensions/lib/checkpoint-meta.ts` | 108 | — | +108 (new) |
+
+Delta, not strike: the growth candidate this register named has landed and the
+row is resolved. One-way imports hold (the lib imports only `node:*` and a
+type-only `ExtensionContext`).
+
+### Unification
+
+- Exports minimal: `runGit`/`GIT_TIMEOUT_MS` module-private; nothing that
+  `checkpoint.ts` does not consume.
+- Follow-up candidates surfaced by review, parked here (not register rows):
+  a git-hang behavioural row — **done 2026-10-21 (WO-2026-059)**: the `execFile`
+  timeout is now pinned by a discriminating row, mutation-checked both ways —
+  and a `tsc --noEmit` step (the repo has no typecheck step — that is how a dead
+  type import survived to review).
+
+## 2026-10-21 — chunk: WO-2026-056 summary schema + observability (`4b2861c..f2cbcbc`)
+
+1 commit (harness-squashed), 3 files: fixed summary schema on both checkpoint
+tools (5 required fields incl. `triedAndFailed`, one `renderSummary` with three
+consumers), token before/after + summary in notify and archive meta, git-ref
+binding in meta. Review: review-code APPROVED_WITH_NOTES, review-tests APPROVED
+(2 rounds). Excluded as before: another session's uncommitted
+`auto-checkpoint.ts` + `settings.json` + `decisions/settings/**`.
+
+### Growth
+
+| file | now | base (`59655ec`) | Δ |
+|---|---:|---:|---:|
+| `extensions/checkpoint.ts` | 901 | 664 | **+237** |
+
+One feature landed almost entirely in one file. The growth is cohesive (schema+
+renderer block, git+tokens block) and single-sourced (one renderer, one meta
+writer + one token patch), so this is a growth strike with a named candidate —
+see the register. If the next landing grows this file again, the area closes and
+the extraction becomes a mandatory order before further feature work here.
+
+### Unification
+
+- One renderer, three consumers (`customInstructions`, meta, fork message) —
+  asserted as such; no per-consumer formatting copy.
+- Meta shape unified across all three archive sites (checkpoint, fork, and the
+  auto-compaction path now writes the same keys).
+- New seam worth watching (not yet a candidate): `metaPathFor`'s
+  `.jsonl`→`.meta.json` convention is mirrored in the test-local `readMeta`
+  helper — unavoidable test mirror, no production duplicate.
+
+## 2026-10-21 — chunk: WO-2026-055 checkpoint injection fix (`689de07..59655ec`)
+
+2 commits (`af2733a` extract, `59655ec` change), 7 files: the shared read-tracking
+helper, the `tool_result.input`/`toolCall` sourcing fix, the staleness guard +
+snapshot label (per the utility evaluation in
+`checkpoint-sanity-check-2026-10.md` §5.7), and honest injection coverage.
+Review: review-code + review-tests APPROVED (2 rounds). Excluded as before:
+another session's uncommitted `extensions/auto-checkpoint.ts` + its test.
+
+### Growth
+
+| file | now | base | Δ |
+|---|---:|---:|---:|
+| `extensions/checkpoint.ts` | 664 | 726 | **−62** |
+| `extensions/lib/read-tracking.ts` | 217 | — | +217 (new; logic moved out of `checkpoint.ts`) |
+| `tests/e2e-checkpoint.test.ts` | 952 | 601 | **+351** (deterministic injection rows M1–M14; vacuous describes deleted) |
+| `tests/read-tracking.test.ts` | 299 | — | +299 (new) |
+
+Production code shrank while gaining the staleness guard; all growth is test
+coverage for a feature that previously could not fail. No growth strike.
+
+### Unification
+
+- **Resolved — read-region tracking had two diverging copies** (`checkpoint.ts`
+  on `tool_execution_end.args`, `auto-checkpoint.ts` on `tool_result.input`).
+  `extensions/lib/read-tracking.ts` is now the one ingestion/merge/normalize
+  path; `checkpoint.ts` consumes it. **One copy remains** in
+  `auto-checkpoint.ts` (grandfathered — another session's WIP): strike recorded
+  above; closes when its migration order lands.
+- Checked and not duplicated by this delta: the staleness guard lives only in
+  `selectFreshRegions`; the snapshot label is one constant in `checkpoint.ts`.
+
+## 2026-10-18 — chunk: seat-burn tracker (WO-2026-053, merge `4e7a00b`)
+
+1 landing: `docs/data/seat_burn.py` (new, 1,397 lines) + 15 committed fixtures
+(`docs/data/testdata/seat_burn/`), plus decision `model-tiers/005` (shared-allowance
+mechanism) and its doc updates. Review: review-code APPROVED_WITH_NOTES, review-tests
+APPROVED (2 rounds).
+
+### Growth
+
+| file | now | base | Δ |
+|---|---:|---:|---:|
+| `docs/data/seat_burn.py` | 1,397 | — | **+1,397** (new) |
+| `docs/data/testdata/seat_burn/**` | 15 files | — | +~275 |
+
+New file lands already large — the flag for the next audit is its *delta*, not the size.
+Ranked extraction candidate if it grows: the price/limit table (the only table in the
+repo that must stay in sync with OpenCode's catalog by hand).
+
+### Unification
+
+- **Price data now exists twice**: `docs/data/seat_burn.py`'s per-class price/limit table
+  vs `docs/data/role_scores.py`'s blended $/M cost axis. Both cite decision records for
+  provenance. If either updates, they drift apart silently — candidate to share one table.
+- **Quota display vs quota projection**: `extensions/footer-session-id.ts` renders the
+  server's plan-wide % (decisions/external-tools/006), `seat_burn.py` projects the same
+  meter from logs. Complementary by design (006's boundary note anticipated this tool);
+  no merge candidate, but the meter formula now lives in two places (`model-tiers/005`
+  and the tool) — the decision is the source of truth.
+
+## 2026-10-18 — chunk: OpenCode Go usage footer (`d4cd160..` this landing)
+
+1 landing: OpenCode Go plan usage in the footer's provider-quota slot
+(`extensions/footer-session-id.ts` Go section + `tests/footer-opencode-usage.test.ts`),
+per `decisions/external-tools/006`.
+
+### Growth
+
+| file | now | base (`d4cd160`) | Δ |
+|---|---|---|---|
+| `extensions/footer-session-id.ts` | 1633 | 1456 | **+177** (file already on the large-file watchlist — see 2026-10-03 entry) |
+| `tests/footer-opencode-usage.test.ts` | 240 | — | +240 (new) |
+
+### Unification
+
+- z.ai/MiniMax percent-color thresholds were two inline IIFEs; now one
+  `colorUsedPct` helper at three call sites (the new Go renderer included).
+- Go usage renders through the existing quota segment slot + refresh cycle
+  (`refreshQuotaNow`) rather than a parallel footer mechanism; a standalone
+  extension could not compose into the footer anyway (single `setFooter` owner).
+
+**Extraction candidate carried forward:** the quota/z.ai/MiniMax/Go block
+(~400 lines of fetch + normalize + render) is the natural split of
+`footer-session-id.ts` into `extensions/lib/quota.ts` if the file keeps growing;
+deferred until a second consumer or another provider lands.
+
+## 2026-10-13 — chunk: todo extension retired (`126d9bf..` this landing)
+
+1 landing: the `todo` tool, widget and `/todos` command removed
+(`extensions/todo.ts` 530 lines, `tests/todo-injection.test.ts` 310,
+`tests/todo-render.test.ts` 108, `docs/todo-injection-fix.md` 96), and the
+instruction text that pointed agents at it now points at the session log's
+state query (`decisions/todo/001`).
+
+### Growth
+
+| file | now | base (`126d9bf`) | Δ |
+|---|---|---|---|
+| `extensions/todo.ts` | — | 530 | **−530** (removed) |
+| `tests/todo-injection.test.ts` | — | 310 | −310 (removed) |
+| `tests/todo-render.test.ts` | — | 108 | −108 (removed) |
+| `docs/todo-injection-fix.md` | — | 96 | −96 (removed) |
+| `extensions/modes.ts` | 256 | 254 | +2 |
+| `agents/bug-triage.md` | 121 | 120 | +1 |
+| `docs/design/session-log-hooks.md` | 58 | 56 | +2 |
+
+Net −1039 lines; no file grew beyond the instruction edits. `createPiStub`
+copies 7 → 6 (`tests/todo-injection.test.ts:47` gone); bare `typebox`
+importers 5 → 4 among top-level `extensions/*.ts` (7 → 6 across all extension
+dirs, so `tests/setup.sh`'s typebox link stays). The top-1 file `extensions/subagent-async/index.ts` (4258
+lines, 1082-line factory) is untouched this chunk.
+
+### Unification
+
+- **Landed — one work-list mechanism.** The in-session todo state (tool +
+  widget + `/todos`) was a parallel record of what the session log already
+  tracks; it is gone, and `summary --session <id> --current` is the single
+  state query. The deletion is negative growth by construction.
+- **Carried forward unchanged:** `createPiStub` extraction (now 6 copies),
+  the `test-workorder-policy.cjs` mirror fold, the `review_policy` single
+  resolver, the `model-tiers` `†` helper.
 
 ## 2026-10-08 — chunk: work-order grammar landing (`16eb6fe..` this landing)
 
@@ -211,3 +574,22 @@ Negative claims are scoped to the files searched: `apps/changelog-gen`,
 beyond the searches above. Candidate 1's spans and candidate 3's regex lines
 were counted; candidates 2 and 4 are structural estimates from matched spans.
 The working tree was not read (another session's WIP excluded by instruction).
+
+## Snapshot 2026-10-22 — WO-2026-060 lands WO-2026-054 (merge `fa84a99`)
+
+**growth.** `extensions/subagent-async/index.ts` takes the mechanism back (+~1.4k: registry
+section, worktree lock/unlock, owner_asks + nextSteps gates), but the branch did the 040
+extraction unprompted: `extensions/lib/subagent-state.ts` (~395 lines) is the sole state
+reader (`readSubagentState`: definition + one consumer) and `extensions/lib/owner-row.ts`
+holds both validators. New suites: worktree-lock (447 lines), state-vocabulary (328),
+owner-asks-gate, recovery-ownership. Review found no new extraction candidates; the ranked
+table above is unchanged and none of its four entries shrank.
+
+**unification.** The merge removed one parallel mechanism rather than adding one:
+`composeSummary`'s predecessor is gone — `renderSummary` is the single summary composer
+(2 call sites, both `composeSummary(renderSummary…)`). `extensions/checkpoint.ts` has now
+been touched by two landings (057 extraction, 060 merge re-point), both summary-shape work
+and related (060 re-bases on 057's contract) — no flag, stays on the watch list. The one
+cross-cutting pattern in the landing: hidden post-branch conventions (the spawn-env/
+hermeticity gate) reddened 14 branch rows until the suites adopted main's idiom — the cost
+was discovery, not design.

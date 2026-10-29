@@ -67,7 +67,7 @@ per-benchmark pages + OpenRouter `/models` + `/benchmarks`, all fetched 2026-07-
 > snapshot data (out of fleet; the next data refresh drops them).
 >
 > **2026-10-01 fleet move (decision [022](../decisions/subagents/022-openrouter-fleet-v41-flash.md)):**
-> z.ai is gone — every seat runs `deepseek/deepseek-v4.1-flash` (orchestrator/oracle
+> z.ai is gone — every seat runs the fleet flash model (orchestrator/oracle
 > `:max`, implement/reviewers `:high`, scouts/compaction `:low` after the effort audit), the
 > `/fleet-model` toggle +
 > `~/.pi/fleet-model.json` override are deleted, and the oracle moved off
@@ -80,9 +80,85 @@ per-benchmark pages + OpenRouter `/models` + `/benchmarks`, all fetched 2026-07-
 > tokens on both DeepInfra and Xiaomi hosts (the endpoint `supports_implicit_caching`
 > flag understates this), making Flash ~29% cheaper than DS first-party on this
 > session's profile. Deferred for the fleet, but the whole review tier
-> (`review-code`/`review-plan`/`review-tests`) now runs the MiMo Flash decorrelation
-> experiment (decision 023) — Xiaomi reviewers against the DeepSeek implementer. The tables below
+> (`review-code`/`review-plan`/`review-tests`) ran the MiMo Flash decorrelation
+> experiment (decision 023) — Xiaomi reviewers against the DeepSeek implementer.
+> **Superseded 2026-10-18 (037):** the seat went to `opencode-go/glm-5.3-flash:high`
+> (Zhipu lab, 40/40 → 65.4/62.2 on the Go scorechart), then to
+> `openrouter/z-ai/glm-5.3-flash:high` under 041. The tables below
 > are unchanged 2026-08-01 snapshot data and contain no v4.1 row.
+>
+> **2026-10-18 checkpoint refresh (decision 035):** the fleet model id moves to
+> `deepseek/deepseek-v4.1-flash-1017` (Oct 17 checkpoint; same seat split and effort
+> levels). Vendor card: TB4.0 31.2→42.3, DeepSWE 74.2→77.0, Apex 64.6→72.1, shorter outputs.
+>
+> **2026-10-18 routing move (decision 036):** the DeepSeek fleet seats (implement/oracle/scouts/
+> compaction) ride the OpenCode Go plan quota (`opencode-go/deepseek-v4.1-flash`, same levels);
+> reviewers stay OpenRouter Xiaomi (023) — **superseded**: the review tier moved to Zhipu-lab
+> GLM-5.3-Flash (037) on the OpenRouter first-party route (041). `-1017` remains manually
+> reachable via OpenRouter.
+
+---
+
+## 2026-10-18 scorechart — OpenCode Go menu (decision model-tiers/003)
+
+Fresh composites after the benchmark-set integrity review: SWE-bench Verified
+dropped, SWE-bench Pro discounted, Terminal-Bench 4.0 (2.0 was two majors stale),
+DeepSWE added, AIME/Codeforces/GPQA informational-only, AA indices used within one
+index version (v4.3.2, sources 2026-10-17). Min-max within the Go subset (22
+SKUs with data; LongCat-2.0, Space Bunny, Hy4 preview, MiMo-V2.5, LongCat/Beam
+free previews have no BenchLM rows). Halluc% = AA-Omniscience hallucination rate
+(informational — closed-book calibration, not an agentic-hallucination proxy).
+
+| SKU | Orch | Impl | R-Code | R-Test | Halluc% | chr-blend ¢/M | solo B tok/mo | Notes |
+|---|--:|--:|--:|--:|--:|--:|--:|---|
+| Kimi K3 | 84.2 | 99.3 | 89.1 | 86.4 | 53.2 | 35.1 | 0.04 (Go) | ⚠ documented eval cheat (answer-key retrieval via sandbox egress, Frontier Security 2026-08); tiny 5h cap |
+| MiMo-V2.6-Pro | 83.1 | -- | 82.2 | 82.4 | 40.6 | 0.88 | 6.8 | Impl granular unpublished; cheapest capable cache ($0.003625) |
+| Step 5 Preview | 83.0 | -- | 80.8 | 81.3 | 43.0 | 11.2 | 0.53 | Preview SKU — 4× bucket may expire |
+| Gemini 4 Argon | 79.3 | -- | 82.2 | 81.6 | **15.1** | 27.0 | 0.22 | Best factuality row; Google self-report caveat; low 5h cap |
+| GLM-5.3 | 78.3 | 97.6 | 73.0 | 68.2 | 29.6 | 27.7 | 0.05 (Go) | Impl solid; expensive cache ($0.26) + 5h cap |
+| Qwen3.8 Max | 71.2 | 78.3 | 69.4 | 66.9 | 28.8 | 28.1 | 0.05 (Go) | |
+| Claude Haiku 5.5 | 69.5 | -- | 65.0 | 65.2 | 40.4 | 1.20 | 1.26 (Go) | ≤100K pricing tier |
+| GLM-5.3-Flash | 69.1 | 80.6 | 65.4 | 62.2 | -- | 3.19 | 5.6 | Reviewer/triage/main-session seat; cache $0.03; halluc unmeasured |
+| GPT-5.6 Luna | 68.0 | 74.2 | 85.3 | 86.7 | **92.6** ⚠ | 2.43 | 0.62 (Go) | Top reviewer scores, worst-in-class hallucination — 016/017 objection stands; ≤272K tier |
+| Grok 4.7 | 67.8 | 84.5 | 57.7 | 57.3 | 29.3 | 52.3 | 0.03 (Go) | ≤200K tier |
+| Qwen3.8 Flash | 67.5 | **88.1** | 66.8 | 63.6 | 45.3 | 1.84 | 1.63 (Go) | Strong implementer value |
+| DeepSeek V4.1 Flash 1017 | 65.3 | **-- unmeasured** | 61.6 | 62.1 | **96.5** ⚠ | 0.54 (peak 1.07) | **29.8** off-peak / 14.9 peak | Fleet seat — **throughput king under every cache assumption**; granular rows unpublished — vendor card only (DeepSWE 77.0, TB4.0 42.3) |
+| Muse Spark 1.3 | 63.9 | 55.9 | **87.1** | **83.9** | 32.9 | 0.32 | 18.9 (Go) | ⚠ Contributor SKU — trains on prompts/completions (Not ZDR); AA independently benchmarked |
+| GLM-5.2 | 51.1 | 58.7 | 50.5 | 47.2 | 26.3 | 27.7 | 0.22 (Go) | |
+| GPT-6 Luna | 45.6 | 6.6 | 58.2 | 58.7 | 76.7 | 1.20 | 1.26 (Go) | ≤272K tier |
+| MiniMax-M3 | 43.1 | 31.4 | 36.0 | 39.1 | 18.4 | 6.42 | 0.93 (Go) | |
+| MiMo-V2.6-Flash | 40.0 | -- | **40.1** | **39.9** | 54.4 | 0.45 | 13.5 (Go) | Former reviewer seat — weakest reviewer row on the menu |
+| DeepSeek V4 Pro (High) | 31.3 | 43.6 | 29.1 | 29.6 | 88.7 | 3.10 (peak 6.20) | 1.9 off-peak / 0.97 peak | Oracle-solid but planning-weak (008); low volume fits |
+| Qwen3.7 Plus | 28.0 | 30.4 | 32.1 | 32.5 | 27.7 | 4.70 | 1.28 (Go) | ≤256K tier |
+| MiMo-V2.5-Pro | 26.7 | 26.6 | 31.8 | 32.3 | 24.7 | 0.88 | 1.70 (Go) | |
+| Hy3 | 25.3 | 14.4 | 29.0 | 30.1 | 74.1 | 3.69 | 1.62 (Go) | |
+| Kimi K2.7 Code | 24.5 | 10.7 | 33.0 | 33.1 | 82.4 | 20.4 | 0.29 (Go) | |
+
+**Cost columns** (owner assumption 2026-10-18: 99% cache-read uniform, 1% io at 80/20
+in/out, off-peak; DS peak ×2 shown): blended $/M and solo monthly tokens
+(`listedLimit ÷ blend`; Plus cap where researched, else Go cap marked "(Go)"). Prices and
+Go limits from the console table (opencode.ai/v2/docs/console/go/, fetched 2026-10-18).
+Caveat: cache ratio is **per-model behavior**, not uniform — OpenCode's own data page puts
+glm-5.3-flash at 93% typical (our corpus: 92.8%), DS rows ~98% — and io price differs
+17× (GLM-Flash 17¢/M avg io vs MiMo-Pro 54¢). At *observed* mixes the meter weight per
+token is DS 5.4e-5 < GLM-Flash 2.2e-4 < MiMo-Pro 3.8e-4 (GLM 1.7× lighter than MiMo); at
+the uniform-99% assumption MiMo-Pro (1.5e-4) edges GLM-Flash (1.8e-4) because the
+assumption shrinks MiMo's expensive-io share. Seat decisions use observed mixes.
+
+Sub-3-point gaps are noise (harness variance — Anthropic's infrastructure-noise
+study moved TB2.0 scores by 6 points on resource config alone). Seat-repick
+rulings landed 2026-10-18 ([subagents/037](../decisions/subagents/037-reviewer-oracle-repick.md)):
+reviewers → `opencode-go/glm-5.3-flash`, oracle → `opencode-go/deepseek-v4-pro`,
+implementer stays on DeepSeek V4.1 Flash. Do not treat the composite as a
+decision — the gaps that matter here are >10 points.
+
+**Cost evaluation is monthly-cap-only** (owner ruling, [model-tiers/004](../decisions/model-tiers/004-monthly-cap-only-cost-metric.md)):
+compare effective monthly volume (monthly listed $ limit ÷ blended $/M burn rate) and
+nothing else. The req/5h column is informational — never a cost input, never
+converted into monthly-equivalents. Effective volume = solo capacity, not a private
+bucket: Go enforces one shared weighted allowance ([model-tiers/005](../decisions/model-tiers/005-shared-allowance-not-buckets.md)),
+so fleet sustainability is judged against `Σ real$ ÷ listedLimit ≤ 1`, and the
+solo-throughput columns below are per-model illustrations of that allowance.
 
 ---
 
@@ -91,9 +167,9 @@ per-benchmark pages + OpenRouter `/models` + `/benchmarks`, all fetched 2026-07-
 | Role | Top pick | Best value | Notes |
 |---|---|---|---|
 | **Orchestrator** | **GPT-5.6 Luna** (93.6, $0.04, 1M) | **DeepSeek V4.1 Flash** (`:max` — decision 022, current fleet) | Luna's live price collapsed ($0.41 → **$0.04**/M blended). The 2026-08-01 snapshot had no v4.1 row; the fleet reverts to DeepSeek after the z.ai plan ended. DeepSeek V4 Flash 0731 projects 85.2 Orch — **proxy, unmeasured** (see refresh note 3). |
-| **Implementer** | **Grok 4.5** (98.8, $0.62) | **DeepSeek V4.1 Flash** (`:high` — decision 022, current fleet) · **DeepSeek V4 Flash 0731** (83.7 ⚠, **$0.019**) | All seats share one model since 2026-10-01; 0731 remains the snapshot's cheap coder — AA-index-only. Pro at `high` scores 48.8. |
+| **Implementer** | **Grok 4.5** (98.8, $0.62) | **DeepSeek V4.1 Flash** (`:high` — decision 022, current fleet) · **DeepSeek V4 Flash 0731** (83.7 ⚠, **$0.019**) | Implementer/scouts/compaction share the one model since 2026-10-01; reviewers and oracle were repicked off it (037/041). 0731 remains the snapshot's cheap coder — AA-index-only. Pro at `high` scores 48.8. |
 | **Oracle (math/algo)** | **DeepSeek V4 Pro** (91.9, snapshot) | **DeepSeek V4.1 Flash** (`:max` — decision 022; CF 3471 / Apex 65.6 beats Pro) | LCB/IMO/HMMT unpublished for 0731, so the snapshot held Pro; v4.1-flash's vendor-card Codeforces/Apex/DeepSWE rows supersede it (022). |
-| **Reviewer (standard)** | **MiMo V2.5 Pro** (54.9 / 58.2, **$0.055**, 1M) | — | Now same-lab with the implementer (`deepseek/deepseek-v4.1-flash` — decision 022); the decorrelated seat no longer exists, 017's mechanical checks carry anti-fabrication. |
+| **Reviewer (standard)** | **MiMo V2.5 Pro** (54.9 / 58.2, **$0.055**, 1M) | — | The review tier runs `openrouter/z-ai/glm-5.3-flash:high` — provider moved 2026-10-22 (041: off OpenCode Go extra-usage billing, same model, Z.AI-first-party route pin). Zhipu lab since 037, so still decorrelated from the DeepSeek implementer; 023's Xiaomi tier is superseded. |
 
 **Two value stars, different jobs:**
 - **DeepSeek V4.1 Flash** (OpenRouter, 1M ctx, multimodal) — the 2026-09-10 successor that
@@ -105,17 +181,17 @@ per-benchmark pages + OpenRouter `/models` + `/benchmarks`, all fetched 2026-07-
 - **GLM-5.3 / GLM-5.3-flash** — retained as history: they ran the fleet on the z.ai plan
   until the subscription ended (decision 020; effort split 021).
 
-**Current assignments vs. the data** (see [Role-by-role review](#role-by-role-review-2026-08-01--historical-audit); fleet moved 2026-10-01 per [decision 022](../decisions/subagents/022-openrouter-fleet-v41-flash.md)):
+**Current assignments vs. the data** (see [Role-by-role review](#role-by-role-review-2026-08-01--historical-audit); fleet moved 2026-10-01 per [decision 022](../decisions/subagents/022-openrouter-fleet-v41-flash.md); model id refreshed to the -1017 checkpoint 2026-10-18 per [decision 035](../decisions/subagents/035-flash-1017-refresh.md); reviewer and oracle rows repicked 037, reviewer provider 041 — the "moved 2026-10-01" verdicts record when each seat adopted its model/level, not the id suffix):
 
 | Slot | Agent file | Model | Effort | Verdict |
 |---|---|---|---|---|
-| Main session | `settings.json` | deepseek/deepseek-v4.1-flash | `defaultThinkingLevel` — `max` | ✓ moved 2026-10-01 (decision 022; user's settings flip to openrouter default) |
-| Orchestrator-subagent | `agents/orchestrator.md` | deepseek/deepseek-v4.1-flash | max | ✓ moved 2026-10-01 (decision 022) |
-| Implementer | `agents/implement.md` | deepseek/deepseek-v4.1-flash | high | ✓ moved 2026-10-01 (decision 022) |
-| Oracle | `agents/math-algo-oracle.md` | deepseek/deepseek-v4.1-flash | max | ✓ moved 2026-10-01 (decision 022; beats 0813 on CF/Apex/DeepSWE/TB2.1) |
-| Review standard ×3 | `agents/review-{code,plan,tests}.md` | xiaomi/mimo-v2.6-flash (experiment 023) | high | ✓ whole review tier moved 2026-10-01 (023) — decorrelated from the DeepSeek implementer |
-| Scouts ×2 | `agents/scout-{code,web}.md` | deepseek/deepseek-v4.1-flash | low | ✓ moved 2026-10-01 (decision 022; `:medium` was a silent clamp to high, replaced with the real discount tier for read-only research) |
-| Compaction | `extensions/compaction-model.ts` | deepseek/deepseek-v4.1-flash | low | ✓ moved 2026-10-01 (decision 022; constant target, explicit `:low` — without a level it rode the provider default `high`) |
+| Main session | `settings.json` | owner-managed (manual `/model`); `settings.json` `defaultModel` is the initial value | owner-managed the same way; `defaultThinkingLevel` is the initial level | ✓ owner-managed since 2026-10-22 — no fixed assignment; orchestrators inherit whatever the session runs (031) |
+| Orchestrator-subagent | `agents/orchestrator.md` | caller's model + `:max` (031; frontmatter donor `opencode-go/deepseek-v4.1-flash`) | max | ✓ moved 2026-10-01 (decision 022) |
+| Implementer | `agents/implement.md` | opencode-go/deepseek-v4.1-flash | high | ✓ moved 2026-10-01 (decision 022) |
+| Oracle | `agents/math-algo-oracle.md` | opencode-go/deepseek-v4-pro | max | ✓ 037, 2026-10-18: the only solid math/algo row on the Go menu (LCB 93.5/IMO 89.8); low volume fits its $15 bucket | ✓ moved 2026-10-01 (decision 022; beats 0813 on CF/Apex/DeepSWE/TB2.1) |
+| Review standard ×3 | `agents/review-{code,plan,tests}.md` | openrouter/z-ai/glm-5.3-flash | high | ✓ provider moved 2026-10-22 (041) — off OpenCode Go extra-usage billing, same model | ✓ migrated 2026-10-18 (037) — Zhipu lab, decorrelated from the DeepSeek implementer; supersedes 023's Xiaomi tier |
+| Scouts ×2 | `agents/scout-{code,web}.md` | opencode-go/deepseek-v4.1-flash | low | ✓ moved 2026-10-01 (decision 022; `:medium` was a silent clamp to high, replaced with the real discount tier for read-only research) |
+| Compaction | `extensions/compaction-model.ts` | opencode-go/deepseek-v4.1-flash | low | ✓ moved 2026-10-01 (decision 022; constant target, explicit `:low` — without a level it rode the provider default `high`) |
 
 > History note: the **review deep ×3** rows (`agents/review-*-deep.md`) were
 > **deleted 2026-08-28** — the tier fired once ever; quality rationale lapsed; see
@@ -198,11 +274,15 @@ implementers — a same-lab reviewer is an independence risk regardless of score
 | DeepSeek V4 Flash (High) | 16.3 | 17.5 | 0.029 | 1048K | DeepSeek ✗ same-lab |
 | MiMo-V2.5 | 17.5 | 13.2 | **0.019** | 1048K | Xiaomi ✓ |
 
-The reviewer seat is now **single-tier** — the standard reviewers run `deepseek/deepseek-v4.1-flash`
-at `:high` (decision 022; the level survived 021, the GLM basis did not); the two-tier split
-(MiMo standard / GLM-5.2 deep) is deleted.
-Note **0731's 80.4 R-code is a same-lab AA-index projection** — the seat accepts same-lab
-for cost, with 017's mechanical checks carrying anti-fabrication.
+The reviewer seat is **single-tier**: fleet flash at `:high` (decision 022; the level
+survived 021, the GLM basis did not), then `xiaomi/mimo-v2.6-flash:high` from 2026-10-01
+(experiment 023) — superseded by 037, which moved the tier to
+`opencode-go/glm-5.3-flash:high` on the Go menu (65.4/62.2 vs MiMo's 40/40, $0.016/M
+blended, Zhipu lab keeps the decorrelation), and 041, which kept the model and moved the
+provider to `openrouter/z-ai/glm-5.3-flash:high` on the Z.AI-first-party pin. The two-tier
+split (MiMo standard / GLM-5.2 deep) is deleted.
+Note **0731's 80.4 R-code is a same-lab AA-index projection** — while the seat was same-lab
+(022), it accepted that for cost, with 017's mechanical checks carrying anti-fabrication.
 
 ---
 
@@ -273,8 +353,9 @@ pricing.
 ## Role-by-role review (2026-08-01) — historical audit
 
 Historical reasoning from the 2026-08-01 snapshot and the 020/021 z.ai move; the current
-state is the **Current assignments** table above (2026-10-01, decision 022). GLM references
-below are history, not fleet config.
+state is the **Current assignments** table above (2026-10-01, decision 022; reviewer and
+oracle rows repicked 037/041). GLM references below are history, not fleet config — every
+model id in items 1–8 below is superseded by 035/036/037/041.
 
 Assignments audited against the refreshed data (the 020/021 move happened 2026-08-28):
 

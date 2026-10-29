@@ -290,6 +290,18 @@ function formatTokens(count: number): string {
 	return `${Math.round(count / 1000000)}M`;
 }
 
+/**
+ * Prompt-token-weighted cache-hit rate (%): cacheRead ÷ (input + cacheRead + cacheWrite).
+ * Cumulative over the session — unlike the bar's latest-turn CH, this is what the
+ * plan meter actually pays on (the rare fresh-reading turns carry the volume).
+ * Undefined when the provider reports no cache activity (mirrors core's guard).
+ */
+export function cacheHitRate(input: number, cacheRead: number, cacheWrite: number): number | undefined {
+	if (cacheRead + cacheWrite === 0) return undefined;
+	const prompt = input + cacheRead + cacheWrite;
+	return prompt > 0 ? (cacheRead / prompt) * 100 : undefined;
+}
+
 function formatCwdForFooter(cwd: string, home: string | undefined): string {
 	if (!home) return cwd;
 	const resolvedCwd = resolve(cwd);
@@ -654,9 +666,24 @@ async function refreshQuotaNow(
 		return;
 	}
 
+	if (provider === "opencode-go") {
+		const hasKey = await ensureGoKey(fc);
+		if (!hasKey || !resolvedGoKey) {
+			cachedGoUsage = undefined;
+			return;
+		}
+		const usage = await fetchOpenCodeUsage(resolvedGoKey);
+		if (usage) {
+			cachedGoUsage = usage;
+			requestRender?.();
+		}
+		return;
+	}
+
 	// Switch-away (or never-supported): drop any stale quota so it can't
 	// show up under a model that doesn't have a quota fetcher.
 	cachedQuota = undefined;
+	cachedGoUsage = undefined;
 	requestRender?.();
 }
 
@@ -707,6 +734,18 @@ function getZaiMultiplier(
 	return 2;
 }
 
+/** Quota percentage with the shared pressure-color thresholds (≥85 error,
+ * ≥60 warning, else success). */
+function colorUsedPct(
+	theme: { fg: (color: string, text: string) => string },
+	usedPct: number,
+): string {
+	const pct = `${usedPct}%`;
+	if (usedPct >= 85) return theme.fg("error", pct);
+	if (usedPct >= 60) return theme.fg("warning", pct);
+	return theme.fg("success", pct);
+}
+
 /**
  * Build the quota segment string for the footer top line.
  * Returns empty string when no quota data is available or model is not zai.
@@ -734,13 +773,7 @@ function renderQuotaSegment(
 		if (!entry) continue;
 		const usedPct = entry.percentage;
 		const label = QUOTA_LABELS[u] ?? `u${u}`;
-		const coloredPct = (() => {
-			const pct = `${usedPct}%`;
-			if (usedPct >= 85) return theme.fg("error", pct);
-			if (usedPct >= 60) return theme.fg("warning", pct);
-			// used < 60% — green (success)
-			return theme.fg("success", pct);
-		})();
+		const coloredPct = colorUsedPct(theme, usedPct);
 		let part = `${label}:${coloredPct}`;
 		// Append compact duration until reset (always shown) for both token
 		// windows — the "when do I get capacity back" signal. Monthly MCP
@@ -757,12 +790,7 @@ function renderQuotaSegment(
 	const mcpEntry = quota.limits.find((l) => l.unit === 5);
 	if (mcpEntry && mcpEntry.currentValue > 0) {
 		const usedPct = mcpEntry.percentage;
-		const coloredPct = (() => {
-			const pct = `${usedPct}%`;
-			if (usedPct >= 85) return theme.fg("error", pct);
-			if (usedPct >= 60) return theme.fg("warning", pct);
-			return theme.fg("success", pct);
-		})();
+		const coloredPct = colorUsedPct(theme, usedPct);
 		parts.push(`MCP:${coloredPct}`);
 	}
 
@@ -807,6 +835,158 @@ function renderQuotaSegment(
 	}
 	// Fallback: just return the first entry
 	return parts[0]!;
+}
+
+// ---------------------------------------------------------------------------
+// OpenCode Go plan usage — GET /zen/go/v1/usage (the only usage endpoint the
+// public proxy exposes; per-model detail is server-side only — see
+// opencode issues #31084/#43983).
+//
+// Display (owner spec, model-tiers/004 monthly-cap-only cost metric):
+//   rolling: percent + time left              `5h:1% 4.6h`
+//   weekly:  percent + %-through + days left  `7d:17% thru86% 1.0d`
+//   monthly: percent + %-through + days left  `mo:8% thru6% 29.3d`
+// The window start is not in the payload: weekly = resetsAt − 7d (exact),
+// monthly = resetsAt − 1 calendar month (billing anniversary — resetsAt keeps
+// the wall-clock time of day, e.g. 21:19:11, so the anchor is stable).
+// ---------------------------------------------------------------------------
+
+export type GoUsageWindow = { percent: number; resetsAtMs: number };
+export type GoUsage = {
+	rolling?: GoUsageWindow;
+	weekly?: GoUsageWindow;
+	monthly?: GoUsageWindow;
+};
+
+/** Cached Go usage, written by the poll cycle and read by render(). */
+let cachedGoUsage: GoUsage | undefined;
+
+/** Suppress repeated console.warn after the first Go fetch failure. */
+let goWarnedOnce = false;
+
+/** Resolved OpenCode Go API key (cached), undefined when unavailable. */
+let resolvedGoKey: string | undefined;
+
+/** True once the Go key has been resolved (even if null). */
+let goKeyResolved = false;
+
+/** Normalize the /zen/go/v1/usage payload. Windows missing percent or a
+ * parseable resetsAt are skipped; nothing usable → undefined. */
+export function normalizeGoUsage(json: unknown): GoUsage | undefined {
+	const root = (json as { usage?: Record<string, unknown> })?.usage;
+	if (!root || typeof root !== "object") return undefined;
+	const out: GoUsage = {};
+	for (const key of ["rolling", "weekly", "monthly"] as const) {
+		const w = root[key] as { percent?: unknown; resetsAt?: unknown } | undefined;
+		if (!w || typeof w.percent !== "number" || typeof w.resetsAt !== "string") continue;
+		const ms = Date.parse(w.resetsAt);
+		if (!Number.isFinite(ms)) continue;
+		out[key] = { percent: Math.round(w.percent), resetsAtMs: ms };
+	}
+	return out.rolling || out.weekly || out.monthly ? out : undefined;
+}
+
+async function fetchOpenCodeUsage(apiKey: string): Promise<GoUsage | undefined> {
+	const controller = new AbortController();
+	const timeoutId = setTimeout(() => controller.abort(), 5000);
+	try {
+		const res = await fetch("https://opencode.ai/zen/go/v1/usage", {
+			headers: { Authorization: `Bearer ${apiKey}` },
+			signal: controller.signal,
+		});
+		if (!res.ok) {
+			if (!goWarnedOnce) {
+				console.warn(`[footer-session-id] opencode-go usage fetch failed: HTTP ${res.status}`);
+				goWarnedOnce = true;
+			}
+			return undefined;
+		}
+		const usage = normalizeGoUsage(await res.json());
+		if (!usage && !goWarnedOnce) {
+			console.warn("[footer-session-id] opencode-go usage response missing windows");
+			goWarnedOnce = true;
+		}
+		return usage;
+	} catch (err: unknown) {
+		if (!goWarnedOnce) {
+			console.warn(
+				"[footer-session-id] opencode-go usage fetch error:",
+				err instanceof Error ? err.message : String(err),
+			);
+			goWarnedOnce = true;
+		}
+		return undefined;
+	} finally {
+		clearTimeout(timeoutId);
+	}
+}
+
+/** Resolve and cache the OpenCode Go API key (`oc_sk_…` in auth.json under
+ * the `opencode-go` provider). */
+async function ensureGoKey(ctx: FooterFactoryCtx): Promise<boolean> {
+	if (goKeyResolved) return !!resolvedGoKey;
+	goKeyResolved = true;
+	try {
+		const key = await ctx.modelRegistry?.getApiKeyForProvider?.("opencode-go");
+		resolvedGoKey = key || undefined;
+		return !!resolvedGoKey;
+	} catch {
+		resolvedGoKey = undefined;
+		return false;
+	}
+}
+
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** %-through the current 7d window (start = resetsAt − 7d). Clamped to 0..100. */
+export function weeklyThroughPercent(now: number, resetsAtMs: number): number {
+	const start = resetsAtMs - WEEK_MS;
+	return Math.max(0, Math.min(100, ((now - start) / WEEK_MS) * 100));
+}
+
+/** %-through the current billing-month window (start = resetsAt minus one
+ * calendar month). Clamped to 0..100. */
+export function monthlyThroughPercent(now: number, resetsAtMs: number): number {
+	const start = new Date(resetsAtMs);
+	start.setMonth(start.getMonth() - 1);
+	const startMs = start.getTime();
+	const len = resetsAtMs - startMs;
+	if (!(len > 0)) return 0;
+	return Math.max(0, Math.min(100, ((now - startMs) / len) * 100));
+}
+
+/** Go usage segment for the footer's quota slot. Empty string when the
+ * provider is not opencode-go or no usage is cached. */
+export function renderGoUsageSegment(
+	usage: GoUsage | undefined,
+	modelProvider: string | undefined,
+	width: number,
+	theme: { fg: (color: string, text: string) => string },
+	now?: number,
+): string {
+	if (modelProvider !== "opencode-go" || !usage) return "";
+	const t = now ?? Date.now();
+
+	const part = (label: string, w: GoUsageWindow, withThrough: boolean, throughOf: (n: number, r: number) => number): string => {
+		const bits = [`${label}:${colorUsedPct(theme, w.percent)}`];
+		if (withThrough) bits.push(theme.fg("dim", `thru${Math.round(throughOf(t, w.resetsAtMs))}%`));
+		const reset = formatResetDuration(w.resetsAtMs, t);
+		if (reset) bits.push(theme.fg("dim", reset));
+		return bits.join(" ");
+	};
+
+	const parts: string[] = [];
+	if (usage.rolling) parts.push(part("5h", usage.rolling, false, weeklyThroughPercent));
+	if (usage.weekly) parts.push(part("7d", usage.weekly, true, weeklyThroughPercent));
+	if (usage.monthly) parts.push(part("mo", usage.monthly, true, monthlyThroughPercent));
+	if (parts.length === 0) return "";
+
+	// Width ladder: all windows → drop monthly (furthest out) → rolling only.
+	for (let keep = parts.length; keep >= 1; keep--) {
+		const candidate = parts.slice(0, keep).join(" ");
+		if (visibleWidth(candidate) <= width) return candidate;
+	}
+	return truncateToWidth(parts[0]!, width, theme.fg("dim", "..."));
 }
 
 import fs from "node:fs";
@@ -1220,6 +1400,10 @@ export default function (pi: ExtensionAPI) {
 					resolvedZaiKey = undefined;
 					minimaxWarnedOnce = false;
 					cachedMinimaxKey = undefined;
+					cachedGoUsage = undefined;
+					goWarnedOnce = false;
+					goKeyResolved = false;
+					resolvedGoKey = undefined;
 					cachedBgRgb = undefined;
 					bgQueryStarted = false;
 				},
@@ -1251,6 +1435,10 @@ export default function (pi: ExtensionAPI) {
 						}
 					}
 
+					// Cumulative CH: same totals that drive the ↑/R/W segments, so the
+					// segment is always derivable from the bar itself (R ÷ (↑+R+W)).
+					const cumulativeCacheHitRate = cacheHitRate(totalInput, totalCacheRead, totalCacheWrite);
+
 					// --- Context usage. ---
 					const ctxUsage = fc.getContextUsage?.();
 					const model = fc.model;
@@ -1276,6 +1464,9 @@ export default function (pi: ExtensionAPI) {
 					if (totalCacheWrite) statsParts.push(`W${formatTokens(totalCacheWrite)}`);
 					if ((totalCacheRead > 0 || totalCacheWrite > 0) && latestCacheHitRate !== undefined) {
 						statsParts.push(`CH${latestCacheHitRate.toFixed(1)}%`);
+					}
+					if (cumulativeCacheHitRate !== undefined) {
+						statsParts.push(theme.fg("dim", `∑CH${cumulativeCacheHitRate.toFixed(1)}%`));
 					}
 					const usingSubscription = model && fc.modelRegistry?.isUsingOAuth?.(model);
 					if (totalCost || usingSubscription) {
@@ -1377,6 +1568,11 @@ export default function (pi: ExtensionAPI) {
 						cachedQuota,
 						model?.provider,
 						model?.id,
+						Math.max(30, width),
+						theme,
+					) || renderGoUsageSegment(
+						cachedGoUsage,
+						model?.provider,
 						Math.max(30, width),
 						theme,
 					);

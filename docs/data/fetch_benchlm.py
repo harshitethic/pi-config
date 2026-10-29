@@ -3,9 +3,9 @@
 
 Sources (all free, no auth except OpenRouter benchmarks which uses the
 pi-openrouter keychain entry, same as the model-tiers extension):
-- BenchLM per-benchmark pages: SWE-bench Pro, SWE-bench Verified,
-  Terminal-Bench 2.0, AA-LCR, AA-IFBench, AA-Intelligence, Codeforces,
-  AIME26, GPQA-D, AA-Omniscience Accuracy/Hallucination Rate.
+- BenchLM per-benchmark pages: SWE-bench Pro, Terminal-Bench 4.0,
+  AA-LCR, AA-IFBench, AA-Intelligence, DeepSWE, Codeforces, AIME26,
+  GPQA-D, AA-Omniscience Accuracy/Hallucination Rate.
   These pages embed per-model scores as __NEXT_DATA__ JSON, including
   thinking-level variant rows like "DeepSeek V4 Pro (High)"/"(Max)".
 - OpenRouter /api/v1/benchmarks: AA Intelligence/Coding/Agentic indices
@@ -17,6 +17,13 @@ publishes no variant split); AA-Intelligence has a BenchLM variant split.
 role_scores.py merges this snapshot with the manual framia dict (LiveCodeBench,
 IMO/HMMT — BenchLM does not track those for DeepSeek).
 
+Benchmark-set policy (integrity review, 2026-10-18 — decision model-tiers/003):
+SWE-bench Verified dropped (OpenAI abandoned it: ~59% flawed tests, contaminated);
+SWE-bench Pro kept but discounted in composites (verifier false-negatives ~24-32%,
+git-history gold-commit exploit); Terminal-Bench scored at 4.0 only (semantic
+versioning — cross-version scores incomparable); DeepSWE added (verifier-hardened);
+AIME/Codeforces/GPQA fetched for informational columns, not composite weight.
+
 Run: python3 docs/data/fetch_benchlm.py   -> writes benchlm_snapshot.json
 """
 import json, os, re, subprocess, sys, time, urllib.request
@@ -26,8 +33,8 @@ OUT = os.path.join(HERE, "benchlm_snapshot.json")
 
 BENCHLM_PAGES = {
     "swe_pro": "swe-bench-pro",
-    "swe_ver": "swe-bench-verified",
-    "tb2": "terminal-bench-2",
+    "tb4": "terminal-bench-4",
+    "deepswe": "deepswe",
     "aa_lcr": "lcr",
     "aa_ifbench": "aaifbench",
     "aa_int": "artificialanalysis",

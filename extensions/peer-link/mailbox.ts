@@ -11,6 +11,12 @@
  * sent to a listed peer while it is offline just sits in its inbox until the
  * peer's next scan. (Senders gate on this: peer-link fails sends to names
  * that match no listed peer.)
+ *
+ * External peers (a non-pi tool, e.g. a Claude Code session via
+ * `external.ts`) register a heartbeat with `external: true` but never poll:
+ * their inbox is read only when their user next prompts. They are listed but
+ * never online, and age out after EXTERNAL_TTL_MS instead of the pi window.
+ * See docs/design/peer-link-external.md.
  */
 
 import { randomUUID } from "node:crypto";
@@ -22,6 +28,7 @@ import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 export const ONLINE_MS = 30_000; // heartbeat freshness window for "online"
 export const HEARTBEAT_MS = 5_000; // heartbeat publish interval
 export const SCAN_MS = 2_000; // inbox poll interval (fs.watch is an accelerator)
+export const EXTERNAL_TTL_MS = 24 * 60 * 60 * 1000; // external registration lifetime since last refresh
 
 export interface Envelope {
 	id: string;
@@ -41,6 +48,8 @@ export interface PeerInfo {
 	cwd?: string;
 	ts: number;
 	autoreply?: boolean;
+	/** Registered by a non-pi tool; reads its inbox only when its user prompts. */
+	external?: boolean;
 	online?: boolean;
 }
 
@@ -221,7 +230,7 @@ export function listPeers(mailbox: string, now = Date.now()): PeerInfo[] {
 		try {
 			const info = JSON.parse(fs.readFileSync(path.join(dir, entry), "utf8")) as PeerInfo;
 			if (typeof info.name !== "string") continue;
-			info.online = now - info.ts <= ONLINE_MS;
+			info.online = !info.external && now - info.ts <= ONLINE_MS;
 			peers.push(info);
 		} catch {
 			// ignore corrupt heartbeat
@@ -275,11 +284,56 @@ export function sweepStalePeers(mailbox: string, now = Date.now()): void {
 		if (!entry.endsWith(".json")) continue;
 		try {
 			const info = JSON.parse(fs.readFileSync(path.join(dir, entry), "utf8")) as PeerInfo;
-			if (now - info.ts > ONLINE_MS * 4) fs.unlinkSync(path.join(dir, entry));
+			const ttl = info.external ? EXTERNAL_TTL_MS : ONLINE_MS * 4;
+			if (now - info.ts > ttl) fs.unlinkSync(path.join(dir, entry));
 		} catch {
 			// leave unreadable files alone
 		}
 	}
+}
+
+/**
+ * Delivery gate for a direct send. Fails when the target is not a listed peer
+ * (regardless of requireOnline — queueing to an unlisted name creates a
+ * phantom inbox), and when the target is not online with requireOnline set
+ * (an external peer never is). Otherwise ok, with the target's status.
+ * Broadcast uses its own zero-targets check (different shape).
+ */
+export function deliveryDecision(
+	to: string,
+	peers: readonly { name: string; online: boolean; external?: boolean }[],
+	requireOnline: boolean,
+): { ok: true; online: boolean; external: boolean } | { ok: false; reason: string } {
+	const known = peers.find((p) => p.name === to);
+	if (!known) {
+		const names = peers.map((p) => `${p.name} (${peerStatus(p)})`);
+		const shown =
+			names.slice(0, 6).join(", ") + (names.length > 6 ? `, … +${names.length - 6} more` : "");
+		return {
+			ok: false,
+			reason:
+				`peer "${to}" is not listed — not queued (no heartbeat matches that name; ` +
+				`queueing it would land in an inbox nobody reads). Known peers: ${shown || "none"}. ` +
+				`Call peer_list — offline peers age out of the registry ~2min after their last heartbeat.`,
+		};
+	}
+	if (requireOnline && !known.online) {
+		const why = known.external ? "is external (reads mail only when its user prompts)" : "is offline";
+		return { ok: false, reason: `peer "${to}" ${why} and requireOnline is set — not queued` };
+	}
+	return { ok: true, online: known.online, external: known.external ?? false };
+}
+
+export function peerStatus(p: { online?: boolean; external?: boolean }): string {
+	if (p.external) return "external";
+	return p.online ? "online" : "offline";
+}
+
+/** What a sender is told about where its message went. */
+export function queuedStatus(d: { online: boolean; external: boolean }): string {
+	if (d.online) return "online";
+	if (d.external) return "queued — external peer, read when its user next prompts";
+	return "queued for when it is online";
 }
 
 /** Build a fresh envelope (convenience for callers). */

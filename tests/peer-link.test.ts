@@ -1,3 +1,10 @@
+// LIVE-NETWORK: this file makes real billed LLM calls on every full `bun test` run.
+// Provider/model: openrouter/deepseek/deepseek-v4-flash (OpenRouter canonical `-20260423`),
+// authorized from the live `~/.pi/agent/auth.json`.
+// Invisible to session-log attribution: the peer-link fixture runs the session via
+// `SessionManager.inMemory`, so no transcript is persisted (~1 live prompt per run).
+// See docs/investigations/or-workspace-attribution-2026-10.md.
+
 /**
  * Tests for the peer-link extension: mailbox mechanics (unit) plus
  * integration with real agent sessions (SDK).
@@ -203,11 +210,11 @@ describe("peer_send requireOnline gate (deliveryDecision)", () => {
 	const online = (names: string[]) => names.map((name) => ({ name, online: true }));
 	it("ok when target online", () => {
 		const r = deliveryDecision("bob", online(["bob"]), false);
-		expect(r).toEqual({ ok: true, online: true });
+		expect(r).toEqual({ ok: true, online: true, external: false });
 	});
 	it("ok when target offline and requireOnline false (default: queue)", () => {
 		const r = deliveryDecision("bob", [{ name: "bob", online: false }], false);
-		expect(r).toEqual({ ok: true, online: false });
+		expect(r).toEqual({ ok: true, online: false, external: false });
 	});
 	it("fails when target offline and requireOnline true", () => {
 		const r = deliveryDecision("bob", [{ name: "bob", online: false }], true);
@@ -228,7 +235,7 @@ describe("peer_send requireOnline gate (deliveryDecision)", () => {
 	});
 	it("ok when target online even with requireOnline true", () => {
 		const r = deliveryDecision("bob", online(["bob"]), true);
-		expect(r).toEqual({ ok: true, online: true });
+		expect(r).toEqual({ ok: true, online: true, external: false });
 	});
 });
 

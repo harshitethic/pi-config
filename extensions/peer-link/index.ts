@@ -34,6 +34,10 @@
  * names, a friendly guess like "tfd-b") would otherwise sit forever in an
  * inbox nobody reads while the tool reports "queued". Only listed peers
  * (heartbeat present, online or stale) accept queued offline delivery.
+ *
+ * External peers (Claude Code sessions via `external.ts`) are listed but never
+ * online: mail to them waits until their user next prompts. Nothing here ever
+ * reads or injects into their inbox.
  */
 
 import { randomUUID } from "node:crypto";
@@ -46,6 +50,7 @@ import {
 	type Envelope,
 	type PeerInfo,
 	ackEnvelope,
+	deliveryDecision,
 	deliveryModeFor,
 	ensureMailbox,
 	inboxDir,
@@ -54,6 +59,8 @@ import {
 	newEnvelope,
 	ownPeerName,
 	peerIdentityFrom,
+	peerStatus,
+	queuedStatus,
 	readIncoming,
 	removeHeartbeat,
 	resolvePeerAddressAmong,
@@ -65,37 +72,11 @@ import {
 
 const PENDING_TTL_MS = 10 * 60 * 1000; // drop queued-but-never-delivered auto-replies
 
-/**
- * Delivery gate for peer_send / peer-send: resolves the policy for one
- * direct send. Fails when the target is not a listed peer (regardless of
- * requireOnline — queueing to an unlisted name creates a phantom inbox),
- * and when the target is listed but offline with requireOnline set.
- * Otherwise ok, with the target's online status (offline = will queue until
- * the peer's next scan). Exported for unit tests; broadcast uses its own
- * zero-targets check (different shape).
- */
-export function deliveryDecision(
-	to: string,
-	peers: readonly { name: string; online: boolean }[],
-	requireOnline: boolean,
-): { ok: true; online: boolean } | { ok: false; reason: string } {
-	const known = peers.find((p) => p.name === to);
-	if (!known) {
-		const names = peers.map((p) => `${p.name} (${p.online ? "online" : "offline"})`);
-		const shown =
-			names.slice(0, 6).join(", ") + (names.length > 6 ? `, … +${names.length - 6} more` : "");
-		return {
-			ok: false,
-			reason:
-				`peer "${to}" is not listed — not queued (no heartbeat matches that name; ` +
-				`queueing it would land in an inbox nobody reads). Known peers: ${shown || "none"}. ` +
-				`Call peer_list — offline peers age out of the registry ~2min after their last heartbeat.`,
-		};
-	}
-	if (requireOnline && !known.online) {
-		return { ok: false, reason: `peer "${to}" is offline (requireOnline set) — not queued` };
-	}
-	return { ok: true, online: known.online };
+export { deliveryDecision } from "./mailbox.ts";
+
+function peerGlyph(p: PeerInfo): string {
+	if (p.external) return "◇";
+	return p.online ? "●" : "○";
 }
 
 export default function (pi: ExtensionAPI) {
@@ -334,9 +315,8 @@ export default function (pi: ExtensionAPI) {
 				peers.length === 0
 					? ["No peers found (none have announced a heartbeat yet)."]
 					: peers.map((p) => {
-							const when = p.online ? "online" : "offline";
-							const where = p.sessionFile ? ` — ${p.sessionFile}` : "";
-							return `${p.online ? "●" : "○"} ${p.name} (${when})${where}`;
+							const where = p.sessionFile ? ` — ${p.sessionFile}` : p.cwd ? ` — ${p.cwd}` : "";
+							return `${peerGlyph(p)} ${p.name} (${peerStatus(p)})${where}`;
 						});
 			return {
 				content: [{ type: "text", text: `self: ${state.peerName}\n${lines.join("\n")}` }],
@@ -349,7 +329,7 @@ export default function (pi: ExtensionAPI) {
 		name: "peer_send",
 		label: "Peer Send",
 		description:
-			"Send a message to another pi session (peer). The message is injected into the peer's session as a user message, triggering its agent. Use peer_list to discover peers. Set expectReply to true to have the peer's response sent back to this session automatically. Use to: \"*\" to broadcast to all online peers. Keep the message information-dense — lead with the ask, skip filler.",
+			"Send a message to another pi session (peer) or an external peer (a Claude Code session; it reads mail only when its user next prompts, so do not wait on its reply). A pi peer's message is injected into the peer's session as a user message, triggering its agent. Use peer_list to discover peers. Set expectReply to true to have the peer's response sent back to this session automatically. Use to: \"*\" to broadcast to all online peers. Keep the message information-dense — lead with the ask, skip filler.",
 		promptSnippet: "Send a message to another pi session and optionally await its reply",
 		promptGuidelines: [
 			"Use peer_send when the user asks to coordinate with another pi session or another agent.",
@@ -418,7 +398,7 @@ export default function (pi: ExtensionAPI) {
 				content: [
 					{
 						type: "text",
-						text: `Message sent to peer "${to}" (${decision.online ? "online" : "queued for when it is online"}).`,
+						text: `Message sent to peer "${to}" (${queuedStatus(decision)}).`,
 					},
 				],
 				details: { to, online: decision.online, expectReply },
@@ -437,7 +417,7 @@ export default function (pi: ExtensionAPI) {
 				`self: ${state.peerName} (auto-reply ${state.autoreply ? "on" : "off"})`,
 				...(peers.length === 0
 					? ["no peers found yet"]
-					: peers.map((p) => `${p.online ? "●" : "○"} ${p.name}${p.online ? "" : " (offline)"}`)),
+					: peers.map((p) => `${peerGlyph(p)} ${p.name}${p.online ? "" : ` (${peerStatus(p)})`}`)),
 			];
 			ctx.ui.notify(lines.join("\n"), "info");
 		},
@@ -490,7 +470,7 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 			sendEnvelope(state.mailbox, newEnvelope(state.peerName, to, match[2].trim(), expectReply, undefined, deliverAs));
-			ctx.ui.notify(`Sent to ${to}${decision.online ? " (online)" : " (queued)"}${expectReply ? " (reply)" : ""}${followUp ? " (follow-up)" : ""}`, "info");
+			ctx.ui.notify(`Sent to ${to} (${queuedStatus(decision)})${expectReply ? " (reply)" : ""}${followUp ? " (follow-up)" : ""}`, "info");
 		},
 	});
 

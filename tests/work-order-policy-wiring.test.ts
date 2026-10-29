@@ -26,6 +26,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import subagentFactory, { metaPath, resolveRunningSession } from "../extensions/subagent-async/index.ts";
+import { scrubSubagentEnv } from "./helpers/subagent-env.ts";
 
 // The record type is internal to the extension; derive it from the accessor.
 type RunningSubagent = NonNullable<ReturnType<typeof resolveRunningSession>>;
@@ -60,8 +61,13 @@ function createCtxStub(cwd: string) {
 
 let fixtureDir: string;
 let argv1Before: string | undefined;
+// Every row spawns `implement` through the tool gate; its allowlist and
+// nesting-cap reads are env-driven, so this file controls that env rather than
+// inheriting whatever the runner has (pi-config#9).
+let restoreSubagentEnv: () => void = () => {};
 
 beforeAll(() => {
+	restoreSubagentEnv = scrubSubagentEnv();
 	// `getPiInvocation` re-invokes `process.argv[1]` (pi's entry when the
 	// extension runs inside pi; this test file under `bun test`). Point it at a
 	// stand-in that never runs a turn — nothing asserted here waits on a model.
@@ -97,6 +103,7 @@ beforeAll(() => {
 
 afterAll(() => {
 	if (argv1Before !== undefined) process.argv[1] = argv1Before;
+	restoreSubagentEnv();
 	rmSync(fixtureDir, { recursive: true, force: true });
 });
 

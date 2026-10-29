@@ -214,4 +214,6 @@ For a single item there is no index: the brief's first line is the row.
 
 **Where a brief lives.** A repo declares the home (TFD: `docs/reviews/`), and each review's item
 table follows the registry spec in that repo's own registry README (TFD:
-`docs/reviews/README.md`, where `python3 scripts/reviews_status.py` prints the ask-list).
+`docs/reviews/README.md` — its **What earns a row** section is the load-bearing text for
+whether an item belongs in the registry at all; `python3 scripts/reviews_status.py` prints
+the ask-list, i.e. the `open` rows).

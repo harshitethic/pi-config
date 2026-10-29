@@ -1,5 +1,7 @@
 {
   "defaultThreshold": 256000,
   "cooldownTurns": 3,
-  "cooldownMs": 30000
+  "cooldownMs": 30000,
+  "idleCompaction": true,
+  "cacheTtlMs": 3600000
 }

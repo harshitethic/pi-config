@@ -1,20 +1,117 @@
 import { mkdir, readdir, readFile, writeFile, stat } from "node:fs/promises";
-import { join, relative, resolve as resolvePath } from "node:path";
+import { join, resolve as resolvePath } from "node:path";
 import type { AgentMessage, AssistantMessage } from "@earendil-works/pi-agent-core";
-import { SessionManager, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
+	SessionManager,
+	type CompactionResult,
+	type ExtensionAPI,
+} from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { setPendingGo } from "./go.ts";
+import {
+	captureGitBinding,
+	metaPathFor,
+	recordTokensAfter,
+	renderTokenDelta,
+	tokensBefore,
+	type CheckpointTokens,
+	type GitBinding,
+} from "./lib/checkpoint-meta.ts";
+import { validateNextStepsOwnerState } from "./lib/owner-row.ts";
+import {
+	ReadTracker,
+	collectPreservedReadPaths,
+	formatRanges,
+	mergeRegions,
+	normalizePath,
+	selectFreshRegions,
+} from "./lib/read-tracking.ts";
+import { listInFlightSubagents, type InFlightSubagent } from "./lib/subagent-state.ts";
 
 const CHECKPOINT_DIR = ".pi/checkpoints";
 const MARKER = "[CHECKPOINT]";
-const SUMMARY_FORMAT_HINT =
-	"Structure the summary with three parts: " +
-	"(1) brief bullet list of what was done/accomplished so far, " +
-	"(2) an in-depth explanation of what's being worked on right now and why, " +
-	"(3) medium-length overview of the overall plan (what comes after this).";
 
 // Fraction of context window to use for file injection (15%).
 const INJECTION_BUDGET_FRACTION = 0.15;
+
+// ---------------------------------------------------------------------------
+// Summary schema + rendering
+// ---------------------------------------------------------------------------
+
+/**
+ * The fixed summary schema both checkpoint tools accept (sanity-check §3 row 5,
+ * §6 item 4). Kept verbatim in the archive meta as `summaryFields`.
+ */
+interface SummaryFields {
+	goal: string;
+	filesTouched: string[];
+	decisions: string[];
+	triedAndFailed: string[];
+	constraints: string;
+}
+
+const SUMMARY_FORMAT_HINT =
+	"`summary` is an object and every field is required: " +
+	"`goal` (one paragraph: what this checkpoint is accomplishing), " +
+	"`filesTouched` (repo-relative paths), " +
+	"`decisions` (choices made, with why), " +
+	"`triedAndFailed` (each entry names an approach tried, what happened, and why it failed — " +
+	"the fresh window retries what it is not told about), " +
+	"`constraints` (limits the next window must respect). " +
+	'Empty means the literal "none"/["none"], never an omitted field.';
+
+/** Every field required: presence is the point, so the typebox schema enforces it. */
+const SUMMARY_SCHEMA = Type.Object(
+	{
+		goal: Type.String({
+			description: "One paragraph: what this checkpoint is accomplishing.",
+		}),
+		filesTouched: Type.Array(Type.String(), {
+			description: "Repo-relative paths touched.",
+		}),
+		decisions: Type.Array(Type.String(), {
+			description: 'Choices made and why. ["none"] when none.',
+		}),
+		triedAndFailed: Type.Array(Type.String(), {
+			description:
+				"Each entry: an approach tried, what happened, and why it failed. " +
+				'The next window retries what it is not told about. ["none"] when none.',
+		}),
+		constraints: Type.String({
+			description: 'Limits the next window must respect. "none" when none.',
+		}),
+	},
+	{ description: SUMMARY_FORMAT_HINT },
+);
+
+const NONE = "none";
+
+/** `"none"`/`["none"]`/`[]` all mean "nothing to report". */
+function isNone(items: string[]): boolean {
+	return items.length === 0 || (items.length === 1 && items[0].trim().toLowerCase() === NONE);
+}
+
+/** `label: none`, or the label followed by one bullet per entry. */
+function bulletSection(label: string, items: string[]): string {
+	if (isNone(items)) return `${label}: ${NONE}`;
+	return `${label}:\n${items.map((item) => `  - ${item}`).join("\n")}`;
+}
+
+/**
+ * The canonical summary text. Its three consumers — the compaction
+ * `customInstructions`, `meta.summary`, and `checkpoint_fork`'s seeded message —
+ * all call this; none formats its own copy.
+ */
+function renderSummary(fields: SummaryFields, nextSteps: string): string {
+	return [
+		`Goal: ${fields.goal}`,
+		`Files touched: ${isNone(fields.filesTouched) ? NONE : fields.filesTouched.join(", ")}`,
+		bulletSection("Decisions", fields.decisions),
+		bulletSection("Tried and failed (and why)", fields.triedAndFailed),
+		`Constraints: ${fields.constraints || NONE}`,
+		`Next: ${nextSteps}`,
+	].join("\n");
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -24,17 +121,22 @@ interface RelevantPathEntry {
 	path: string;
 }
 
-interface ReadRegion {
-	offset: number;
-	/** Number.MAX_SAFE_INTEGER means "read to end". */
-	limit: number;
+/** Everything an archive records besides the transcript itself. */
+interface ArchiveMetaExtras {
+	summaryFields: SummaryFields | null;
+	tokens: CheckpointTokens;
+	git: GitBinding | null;
+	/** Set by `checkpoint_fork`: the cwd the new session lands in. */
+	newCwd?: string;
 }
 
 /** State passed from checkpoint tool → compaction hook → onComplete callback. */
 interface PendingCheckpoint {
+	/** `composeSummary` output — the text the fresh window receives verbatim. */
 	summary: string;
 	next: string;
 	doContinue: boolean;
+	tokens: CheckpointTokens;
 	archivePath?: string;
 	relevantPaths: RelevantPathEntry[];
 	cwd: string;
@@ -42,16 +144,12 @@ interface PendingCheckpoint {
 	injection?: { text: string; omitted: string[]; skippedPreserved: string[] };
 }
 
-type StrippedAssistant = Omit<AssistantMessage, "content"> & {
-	content: AssistantMessage["content"];
-};
-
 // ---------------------------------------------------------------------------
 // Session-scoped state
 // ---------------------------------------------------------------------------
 
 /** Files read this session, keyed by normalized relative-to-cwd path. */
-const readRegions = new Map<string, ReadRegion[]>();
+const reads = new ReadTracker();
 
 /** Pending checkpoint data that bridges execute() → session_before_compact → onComplete. */
 let pendingCheckpoint: PendingCheckpoint | null = null;
@@ -64,74 +162,58 @@ let pendingCheckpoint: PendingCheckpoint | null = null;
 let compactRequested = false;
 
 // ---------------------------------------------------------------------------
-// Path helpers
-// ---------------------------------------------------------------------------
-
-function normalizePath(filePath: string, cwd: string): string {
-	const absolute = resolvePath(cwd, filePath);
-	const rel = relative(cwd, absolute);
-	return rel.startsWith("..") ? absolute : rel || ".";
-}
-
-// ---------------------------------------------------------------------------
-// Read-region helpers
+// In-flight subagent record (R3-1)
 // ---------------------------------------------------------------------------
 
 /**
- * Merge overlapping/adjacent read regions to minimise duplicated content.
- * Returns inclusive line numbers (endLine is the last line included).
+ * The machine-built "In-flight subagents" section appended to every archived
+ * summary. Sourced read-only from the subagent meta registry (tfd
+ * process-controls R3, owner 2026-10-19) — never from the model's summary, so
+ * work in flight cannot be lost by an omission in the prose. Empty registry
+ * (or no running/orphaned child) means no section.
  */
-function mergeRegions(regions: ReadRegion[]): Array<{ offset: number; endLine: number }> {
-	const sorted = regions
-		.map((r) => ({ offset: r.offset, endLine: r.offset + r.limit - 1 }))
-		.sort((a, b) => a.offset - b.offset);
-
-	const merged: Array<{ offset: number; endLine: number }> = [];
-	for (const r of sorted) {
-		const prev = merged[merged.length - 1];
-		if (prev && r.offset <= prev.endLine + 1) {
-			prev.endLine = Math.max(prev.endLine, r.endLine);
-		} else {
-			merged.push({ ...r });
-		}
+export function formatInFlightSection(entries: InFlightSubagent[]): string {
+	if (entries.length === 0) return "";
+	const lines = ["### In-flight subagents", "_Recorded by the checkpoint tool from the subagent meta registry._"];
+	for (const e of entries) {
+		const agent = e.agentName ? ` (${e.agentName})` : "";
+		const branch = e.branch ? `branch \`${e.branch}\`` : "no worktree branch";
+		lines.push(`- \`${e.sid}\`${agent} — ${branch} — state: ${e.state} (${e.evidence})`);
+		if (e.resumeCall) lines.push(`  - resumable: \`${e.resumeCall}\``);
 	}
-	return merged;
+	return lines.join("\n");
 }
 
-// ---------------------------------------------------------------------------
-// Preservation boundary detection
-// ---------------------------------------------------------------------------
+/** The stored summary: the model's three-part summary plus the machine section. */
+function composeSummary(summary: string, section: string): string {
+	return section ? `${summary}\n\n${section}` : summary;
+}
 
 /**
- * Scan session entries from `firstKeptEntryId` forward and collect the set of
- * file paths that appear in preserved `read` tool calls.  These files are
- * already in the retained context and should not be re-injected.
- *
- * Uses the raw args.path from tool_use blocks and normalises them the same
- * way readRegions keys are built.
+ * R6 (tfd process-controls, owner 2026-10-19): `nextSteps` states owner state
+ * only by registry row id. `error` is the tool-error result for a violating
+ * claim (the tool call lands nothing); `warning` is the existence lookup's
+ * degradation when the repo's registry script cannot run — non-blocking, but
+ * carried onto the tool result and a `ui.notify` warning so it is never silent.
  */
-function getPreservedPaths(
-	entries: Array<{ id: string; type: string; message?: AgentMessage | null }>,
-	firstKeptEntryId: string,
+function checkOwnerState(
+	nextSteps: string,
 	cwd: string,
-): Set<string> {
-	const paths = new Set<string>();
-	let found = false;
-	for (const entry of entries) {
-		if (entry.id === firstKeptEntryId) found = true;
-		if (!found) continue;
-		if (entry.type === "message" && entry.message?.role === "assistant") {
-			for (const block of entry.message.content) {
-				if (block.type === "tool_use" && block.name === "read") {
-					const input = (block as { input?: { path?: unknown; offset?: unknown; limit?: unknown } }).input;
-					const rawPath = input?.path;
-					if (typeof rawPath !== "string") continue;
-					paths.add(normalizePath(rawPath, cwd));
-				}
-			}
-		}
-	}
-	return paths;
+): { error?: { content: Array<{ type: "text"; text: string }>; isError: true }; warning?: string } {
+	const verdict = validateNextStepsOwnerState(nextSteps, cwd);
+	if (verdict.ok) return { warning: verdict.warning };
+	return {
+		error: {
+			content: [{ type: "text" as const, text: `Error: ${verdict.error}` }],
+			isError: true,
+		},
+	};
+}
+
+/** Test hook: scan this directory for the meta registry instead of /tmp. */
+let inflightScanDirOverride: string | undefined;
+export function _testSetInflightScanDir(dir: string | undefined): void {
+	inflightScanDirOverride = dir;
 }
 
 // ---------------------------------------------------------------------------
@@ -143,12 +225,21 @@ function estimateTokens(content: string): number {
 }
 
 /**
+ * One line saying what the injected block is: content re-read from disk at
+ * checkpoint time, line ranges picked from an earlier read.
+ */
+const SNAPSHOT_LABEL =
+	"[Disk snapshot taken at checkpoint time — line ranges were selected from an earlier read, so line numbers may have shifted.]";
+
+/**
  * Read file contents for each entry in `relevantPaths`, skipping files that
  * are already preserved in the compacted context.
  *
  * Only the lines actually read this session are injected — if the whole file
  * was read the whole file goes through.  Files with no tracked read regions
- * are skipped entirely.
+ * are skipped entirely.  Windows whose file changed since the read are never
+ * served: their line numbers described an older version, so the file is named
+ * for a re-read instead.
  */
 async function buildFileInjection(
 	relevantPaths: RelevantPathEntry[],
@@ -162,6 +253,7 @@ async function buildFileInjection(
 	const parts: string[] = [];
 	const omitted: string[] = [];
 	const skippedPreserved: string[] = [];
+	const changed: string[] = [];
 	let used = 0;
 
 	for (const entry of relevantPaths) {
@@ -174,18 +266,30 @@ async function buildFileInjection(
 			continue;
 		}
 
+		// No read regions tracked → nothing to inject, skip entirely.
+		const regions = reads.regionsFor(entry.path, cwd);
+		if (!regions || regions.length === 0) continue;
+
 		// -- Read and format file content (matching read-tool output format) -
 		const absolutePath = resolvePath(cwd, entry.path);
 		let content: string;
 
 		try {
-			const raw = await readFile(absolutePath, "utf-8");
-			const regions = readRegions.get(key);
+			const [raw, snapshot] = await Promise.all([
+				readFile(absolutePath, "utf-8"),
+				stat(absolutePath),
+			]);
 
-			// No read regions tracked → nothing to inject, skip entirely.
-			if (!regions || regions.length === 0) continue;
+			// A window read from another version of the file describes line
+			// numbers that no longer hold, so it is dropped rather than served.
+			const fresh = selectFreshRegions(regions, snapshot);
+			if (fresh.length === 0) {
+				changed.push(entry.path);
+				continue;
+			}
+			if (fresh.length < regions.length) changed.push(entry.path);
 
-			const merged = mergeRegions(regions);
+			const merged = mergeRegions(fresh);
 			const rawLines = raw.split("\n");
 			const totalLines = rawLines.length;
 			// Single region covering the whole file → no continuation hints.
@@ -218,13 +322,12 @@ async function buildFileInjection(
 		used += blockTokens;
 	}
 
-	let text = parts.join("\n\n");
+	let text = parts.length > 0 ? `${SNAPSHOT_LABEL}\n${parts.join("\n\n")}` : "";
 
 	const notes: string[] = [];
 	if (skippedPreserved.length > 0) {
 		notes.push(
-			`${skippedPreserved.length} file(s) already in preserved context — skipped: ${skippedPreserved.join(", ")}. ` +
-			``,
+			`${skippedPreserved.length} file(s) already in preserved context — skipped: ${skippedPreserved.join(", ")}. `,
 		);
 	}
 	if (omitted.length > 0) {
@@ -232,6 +335,11 @@ async function buildFileInjection(
 			`${parts.length} of ${relevantPaths.length} files included ` +
 			`(budget: ${budget.toLocaleString()} tokens, ~${Math.round(INJECTION_BUDGET_FRACTION * 100)}% of context window). ` +
 			`Omitted: ${omitted.join(", ")}. Use read tool if needed.`,
+		);
+	}
+	if (changed.length > 0) {
+		notes.push(
+			`${changed.length} file(s) changed since read — re-read if needed: ${changed.join(", ")}. `,
 		);
 	}
 	if (notes.length > 0) {
@@ -251,12 +359,13 @@ function stripThinking(msg: AssistantMessage): AssistantMessage {
 	return filtered.length === msg.content.length ? msg : { ...msg, content: filtered };
 }
 
-/** Write session entries to a JSONL archive. */
+/** Write session entries to a JSONL archive, plus the single meta record beside it. */
 async function archiveSession(
 	cwd: string,
 	entries: unknown[],
 	summary: string,
-	sessionId?: string,
+	sessionId: string | undefined,
+	extras: ArchiveMetaExtras,
 ): Promise<string> {
 	const archiveDir = join(cwd, CHECKPOINT_DIR);
 	await mkdir(archiveDir, { recursive: true });
@@ -274,7 +383,7 @@ async function archiveSession(
 	}
 	await writeFile(archivePath, lines.join("\n") + "\n", "utf8");
 
-	const metaPath = archivePath.replace(/\.jsonl$/, ".meta.json");
+	const metaPath = metaPathFor(archivePath);
 	await writeFile(
 		metaPath,
 		JSON.stringify(
@@ -284,6 +393,10 @@ async function archiveSession(
 				archivePath,
 				summary,
 				entryCount: entries.length,
+				summaryFields: extras.summaryFields,
+				tokens: extras.tokens,
+				git: extras.git,
+				...(extras.newCwd ? { newCwd: extras.newCwd } : {}),
 			},
 			null,
 			2,
@@ -300,22 +413,15 @@ async function archiveSession(
 export default function (pi: ExtensionAPI) {
 	// -- Read tracking ---------------------------------------------------
 	pi.on("session_start", () => {
-		readRegions.clear();
+		reads.clear();
 		pendingCheckpoint = null;
 		compactRequested = false;
 	});
 
-	pi.on("tool_execution_end", (event, ctx) => {
-		if (event.toolName !== "read" || event.isError) return;
-		const path: string | undefined = event.args?.path;
-		if (!path) return;
-		const offset: number = event.args?.offset ?? 1;
-		const limit: number = event.args?.limit ?? Number.MAX_SAFE_INTEGER;
-
-		const key = normalizePath(path, ctx.cwd);
-		const regions = readRegions.get(key) ?? [];
-		regions.push({ offset, limit });
-		readRegions.set(key, regions);
+	// Finalized read args arrive here, on `input`. `tool_execution_end` carries
+	// no args at all, so tracking from it recorded nothing (WO-2026-055).
+	pi.on("tool_result", async (event, ctx) => {
+		await reads.recordToolResult(event, ctx.cwd);
 	});
 
 	// -- Compaction trigger ----------------------------------------------
@@ -336,21 +442,46 @@ export default function (pi: ExtensionAPI) {
 		const pending = pendingCheckpoint;
 		ctx.compact({
 			customInstructions: `${MARKER}\n${pending?.summary ?? ""}`,
-			onComplete: () => {
+			onComplete: async (result: CompactionResult) => {
 				const inj = pending?.injection;
+				const tokens: CheckpointTokens = {
+					before: result?.tokensBefore ?? pending?.tokens.before ?? null,
+					after: result?.estimatedTokensAfter ?? null,
+				};
 				pendingCheckpoint = null;
 
+				// Notify and continuation run before the meta patch below: pi does
+				// not await this callback, and a checkpoint's user-visible outcome
+				// must not wait on an archive write. The outer catch keeps a throw
+				// visible as "Checkpoint failed" — pi's compaction wrapper only sees
+				// synchronous throws from this callback.
 				try {
-					const archiveLine = pending?.archivePath ? `\nArchive: ${pending.archivePath}` : "";
-					ctx.ui.notify(`Checkpoint complete — context cleared.${archiveLine}`, "info");
-				} catch { /* ctx stale after reload */ }
-				if (pending?.doContinue) {
-					const parts = [pending.next];
-					if (inj?.text) parts.unshift(inj.text);
-					if (pending.archivePath) parts.push(`Archive: ${pending.archivePath}`);
-					const followUp = parts.join("\n\n");
-					pi.sendUserMessage(followUp, { deliverAs: "followUp" });
+					try {
+						const archiveLine = pending?.archivePath ? `\nArchive: ${pending.archivePath}` : "";
+						ctx.ui.notify(
+							`Checkpoint complete — context cleared.${renderTokenDelta(tokens)}${archiveLine}`,
+							"info",
+						);
+					} catch { /* ctx stale after reload */ }
+					if (pending?.doContinue) {
+						const parts = [pending.next];
+						if (inj?.text) parts.unshift(inj.text);
+						if (pending.archivePath) parts.push(`Archive: ${pending.archivePath}`);
+						const followUp = parts.join("\n\n");
+						pi.sendUserMessage(followUp, { deliverAs: "followUp" });
+					}
+				} catch (err) {
+					try {
+						ctx.ui.notify(
+							`Checkpoint failed: ${err instanceof Error ? err.message : String(err)}`,
+							"error",
+						);
+					} catch { /* ctx stale after reload */ }
 				}
+
+				try {
+					await recordTokensAfter(pending?.archivePath, tokens);
+				} catch { /* meta gone — the notify already carries the delta */ }
 			},
 			onError: (err) => {
 				pendingCheckpoint = null;
@@ -370,8 +501,12 @@ export default function (pi: ExtensionAPI) {
 
 			// Read and inject files now that we know the preservation boundary.
 			if (pendingCheckpoint) {
-				const preserved = getPreservedPaths(
-					ctx.sessionManager.getEntries(),
+				// Scope the scan to the entries being compacted: `getEntries()` also
+				// holds off-branch reads, which are not in the model's context and
+				// would wrongly suppress injection.
+				const entries = event.branchEntries ?? ctx.sessionManager.getEntries();
+				const preserved = collectPreservedReadPaths(
+					entries,
 					preparation.firstKeptEntryId,
 					ctx.cwd,
 				);
@@ -400,6 +535,12 @@ export default function (pi: ExtensionAPI) {
 				ctx.sessionManager.getEntries(),
 				autoSummary,
 				ctx.sessionManager.getSessionId(),
+				{
+					// No authored summary here — the auto path has no schema fields.
+					summaryFields: null,
+					tokens: { before: preparation.tokensBefore, after: null },
+					git: await captureGitBinding(ctx.cwd),
+				},
 			);
 			ctx.ui.notify(`📦 Archived session for grepping: ${archivePath}`, "info");
 		} catch (err) {
@@ -419,7 +560,7 @@ export default function (pi: ExtensionAPI) {
 			"Use at logical task boundaries when work for this turn is done but more remains. " +
 			"Preserved reads are skipped automatically — only files the model hasn't seen in the preserved tail are injected.",
 		parameters: Type.Object({
-			summary: Type.String({ description: SUMMARY_FORMAT_HINT }),
+			summary: SUMMARY_SCHEMA,
 			nextSteps: Type.Optional(
 				Type.String({
 					description:
@@ -449,10 +590,26 @@ export default function (pi: ExtensionAPI) {
 			),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			const ownerState = checkOwnerState(params.nextSteps ?? "", ctx.cwd);
+			if (ownerState.error) return ownerState.error;
+			if (ownerState.warning) ctx.ui.notify(ownerState.warning, "warning");
+
 			const next = params.nextSteps ?? "Continue work";
 			const doContinue = params.continue !== false;
 			const relevantPaths: RelevantPathEntry[] = params.relevantPaths ?? [];
 			const contextWindow = ctx.model?.contextWindow ?? 200_000;
+			const summaryFields: SummaryFields = params.summary;
+
+			// Captured before anything is written, so the archive's own untracked
+			// files cannot show up in `git.dirty`.
+			const git = await captureGitBinding(ctx.cwd);
+			const tokens: CheckpointTokens = { before: tokensBefore(ctx), after: null };
+
+			// R3-1: one composed summary serves both the archive and the restore
+			// path, so the in-flight record is in the context after compaction.
+			const inFlight = listInFlightSubagents({ dir: inflightScanDirOverride });
+			const section = formatInFlightSection(inFlight);
+			const summary = composeSummary(renderSummary(summaryFields, next), section);
 
 			// Archive *before* compaction so all entries are captured in full.
 			let archivePath: string | undefined;
@@ -460,8 +617,9 @@ export default function (pi: ExtensionAPI) {
 				archivePath = await archiveSession(
 					ctx.cwd,
 					ctx.sessionManager.getEntries(),
-					params.summary,
+					summary,
 					ctx.sessionManager.getSessionId(),
+					{ summaryFields, tokens, git },
 				);
 			} catch (err) {
 				ctx.ui.notify(
@@ -475,9 +633,10 @@ export default function (pi: ExtensionAPI) {
 			// the request for the turn_end trigger. Do NOT compact here: the
 			// tool result has not been persisted yet.
 			pendingCheckpoint = {
-				summary: params.summary,
+				summary,
 				next,
 				doContinue,
+				tokens,
 				archivePath,
 				relevantPaths,
 				cwd: ctx.cwd,
@@ -486,6 +645,13 @@ export default function (pi: ExtensionAPI) {
 			compactRequested = true;
 
 			const responseLines = [`Checkpoint queued.`];
+			if (ownerState.warning) responseLines.push(ownerState.warning);
+			if (inFlight.length > 0) {
+				responseLines.push(
+					`In-flight subagents recorded in the summary: ${inFlight.length} ` +
+						`(${inFlight.map((e) => `${e.sid.slice(-8)} ${e.state}`).join(", ")}).`,
+				);
+			}
 			if (archivePath) {
 				responseLines.push(`Full session archived to:\n\`${archivePath}\``);
 				responseLines.push(`Grep there with: \`rg PATTERN ${archivePath}\``);
@@ -514,9 +680,7 @@ export default function (pi: ExtensionAPI) {
 			newCwd: Type.String({
 				description: "Target working directory for the forked session. Must already exist.",
 			}),
-			summary: Type.String({
-				description: `${SUMMARY_FORMAT_HINT} Authored inline from current context.`,
-			}),
+			summary: SUMMARY_SCHEMA,
 			nextSteps: Type.Optional(
 				Type.String({
 					description:
@@ -563,12 +727,30 @@ export default function (pi: ExtensionAPI) {
 				};
 			}
 
+			// Argument shape first: the R6 verdict (refusal or warning) goes on the
+			// tool result, so it must not sit behind an early `return`.
+			const ownerState = checkOwnerState(params.nextSteps ?? "", ctx.cwd);
+			if (ownerState.error) return ownerState.error;
+			if (ownerState.warning) ctx.ui.notify(ownerState.warning, "warning");
+
 			const next = params.nextSteps ?? "Continue work";
 			const doContinue = params.continue !== false;
 			const relevantPaths: RelevantPathEntry[] = params.relevantPaths ?? [];
 			const oldSessionId = ctx.sessionManager.getSessionId();
 			const oldCwd = ctx.sessionManager.getCwd();
 			const contextWindow = ctx.model?.contextWindow ?? 200_000;
+			const summaryFields: SummaryFields = params.summary;
+
+			// The source tree's ref, captured when the fork is authored (the archive
+			// itself is written at /go, after this): the summary describes this state.
+			const git = await captureGitBinding(oldCwd);
+			const tokens: CheckpointTokens = { before: tokensBefore(ctx), after: null };
+
+			// R3-1: both the fork-source archive and the new session's summary
+			// carry the in-flight record.
+			const inFlight = listInFlightSubagents({ dir: inflightScanDirOverride });
+			const section = formatInFlightSection(inFlight);
+			const summary = composeSummary(renderSummary(summaryFields, next), section);
 
 			// Fork creates a new session — no preservation to dedup against.
 			const injection = await buildFileInjection(
@@ -587,8 +769,9 @@ export default function (pi: ExtensionAPI) {
 						const forkArchivePath = await archiveSession(
 							cmdCtx.cwd,
 							cmdCtx.sessionManager.getEntries(),
-							params.summary,
+							summary,
 							cmdCtx.sessionManager.getSessionId(),
+							{ summaryFields, tokens, git, newCwd: params.newCwd },
 						);
 						cmdCtx.ui.notify(`📦 Fork source archived: ${forkArchivePath}`, "info");
 					} catch (err) {
@@ -607,7 +790,7 @@ export default function (pi: ExtensionAPI) {
 					});
 					newSession.appendMessage({
 						role: "assistant",
-						content: [{ type: "text", text: params.summary }],
+						content: [{ type: "text", text: summary }],
 						api: "anthropic",
 						provider: "anthropic",
 						model: "unknown",
@@ -630,6 +813,10 @@ export default function (pi: ExtensionAPI) {
 			ctx.ui.notify(`Fork prepared → ${params.newCwd}. Run /go to switch.`, "info");
 
 			const responseLines = [`Fork prepared → ${params.newCwd}. Run /go to switch.`];
+			if (ownerState.warning) responseLines.push(ownerState.warning);
+			if (inFlight.length > 0) {
+				responseLines.push(`In-flight subagents recorded in the summary: ${inFlight.length}.`);
+			}
 			if (relevantPaths.length > 0) {
 				const notes: string[] = [];
 				notes.push(
@@ -662,7 +849,12 @@ export default function (pi: ExtensionAPI) {
 				for (const f of files.sort().reverse()) {
 					const meta = JSON.parse(await readFile(join(archiveDir, f), "utf8"));
 					const shortPath = meta.archivePath ? meta.archivePath.replace(archiveDir, "") : f.replace(/\.meta\.json$/, ".jsonl");
-					lines.push(`  ${meta.timestamp} — ${meta.summary.split("\n")[0]}`);
+					// First line of the rendered summary is its `Goal:` line.
+					const headline = String(meta.summary ?? "(no summary)").split("\n")[0];
+					const git = meta.git
+						? ` [${meta.git.branch}@${String(meta.git.head).slice(0, 7)}${meta.git.dirty ? "+" : ""}]`
+						: "";
+					lines.push(`  ${meta.timestamp} — ${headline}${git}`);
 					lines.push(`        archive: …${shortPath}`);
 				}
 				ctx.ui.notify(lines.join("\n"), "info");
@@ -680,22 +872,10 @@ export default function (pi: ExtensionAPI) {
 			const focus = args.trim();
 
 			let fileHint = "";
-			if (readRegions.size > 0) {
+			if (reads.size > 0) {
 				const lines: string[] = [];
-				for (const [path, regions] of readRegions) {
-					const merged = mergeRegions(regions);
-					const ranges = merged
-						.map((r) =>
-							r.endLine >= Number.MAX_SAFE_INTEGER - 1
-								? `L${r.offset}-end`
-								: `L${r.offset}-${r.endLine}`,
-						)
-						.join(", ");
-					const fullFile =
-						merged.length === 1 &&
-						merged[0].offset === 1 &&
-						merged[0].endLine >= Number.MAX_SAFE_INTEGER - 1;
-					lines.push(`- ${path}${fullFile ? " (entire file)" : ` → ${ranges}`}`);
+				for (const { path, merged, wholeFile } of reads.fileSummaries()) {
+					lines.push(`- ${path}${wholeFile ? " (entire file)" : ` → ${formatRanges(merged)}`}`);
 				}
 				fileHint =
 					`\n\nFiles read this session (be conservative with relevantPaths — only include files you're certain you'll need; ` +

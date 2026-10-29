@@ -15,7 +15,14 @@ import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { resolveThreshold, matchPattern, default as loadExtension } from "../extensions/auto-checkpoint";
+import {
+	resolveThreshold,
+	resolveModelConfig,
+	matchPattern,
+	matchModel,
+	idleCompactDelayMs,
+	default as loadExtension,
+} from "../extensions/auto-checkpoint";
 
 // ---------------------------------------------------------------------------
 // resolveThreshold
@@ -27,6 +34,8 @@ describe("resolveThreshold", () => {
 		smallWindowFraction: 0.8,
 		cooldownTurns: 3,
 		cooldownMs: 30_000,
+		idleCompaction: true,
+		cacheTtlMs: 60 * 60_000,
 		models: {},
 		prompt: "x",
 		defaultContextDegradation: true,
@@ -84,6 +93,107 @@ describe("matchPattern", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Model identification: one pattern must cover every route and every version
+// ---------------------------------------------------------------------------
+
+describe("matchModel", () => {
+	// The same model, as three routes spell it.
+	const go = { id: "deepseek-v4.1-flash", provider: "opencode-go" };
+	const openrouter = { id: "deepseek/deepseek-v4.1-flash", provider: "openrouter" };
+	const zai = { id: "glm-5.3-flash", provider: "z.ai" };
+
+	it("matches a family token through any route and version", () => {
+		for (const m of [go, openrouter, { id: "deepseek-v5-pro", provider: "z.ai" }]) {
+			expect(matchModel("deepseek*", m)).toBe(true);
+			expect(matchModel("*deepseek*", m)).toBe(true);
+		}
+		expect(matchModel("deepseek*", zai)).toBe(false);
+	});
+
+	it("matches provider-qualified patterns", () => {
+		expect(matchModel("opencode-go/*", go)).toBe(true);
+		expect(matchModel("openrouter/*", openrouter)).toBe(true);
+		expect(matchModel("openrouter/*", go)).toBe(false);
+		expect(matchModel("*/glm-*", zai)).toBe(true);
+	});
+
+	it("still accepts a bare id string (provider unknown)", () => {
+		expect(matchModel("deepseek*", "deepseek-v4.1-flash")).toBe(true);
+		expect(matchModel("opencode-go/*", "deepseek-v4.1-flash")).toBe(false);
+	});
+});
+
+describe("resolveModelConfig identity + family TTL", () => {
+	const base = {
+		defaultThreshold: 256000,
+		smallWindowFraction: 0.8,
+		cooldownTurns: 3,
+		cooldownMs: 30_000,
+		idleCompaction: true,
+		cacheTtlMs: 60 * 60_000,
+		models: {},
+		prompt: "x",
+		defaultContextDegradation: true,
+	};
+	const HOUR = 60 * 60_000;
+
+	it("a documented family keeps its TTL through every route and version", () => {
+		for (const m of [
+			{ id: "claude-opus-4-7", provider: "anthropic" },
+			{ id: "anthropic/claude-sonnet-5", provider: "openrouter" },
+		]) {
+			expect(resolveModelConfig(m, base).cacheTtlMs).toBe(5 * 60_000);
+		}
+	});
+
+	it("a family with only a typical range falls back to the 1 h assumption", () => {
+		// DeepSeek documents "usually within a few hours to a few days" — a range,
+		// not a floor — and OpenCode Go publishes no TTL for its DeepSeek route.
+		// Nothing guarantees more than an hour, so DeepSeek gets the default.
+		// Do not raise this without evidence of a minimum lifetime.
+		for (const m of [
+			{ id: "deepseek-v4.1-flash", provider: "opencode-go" },
+			{ id: "deepseek/deepseek-v4-pro", provider: "openrouter" },
+			{ id: "deepseek-v5", provider: "z.ai" },
+			{ id: "deepseek-flash", provider: "deepseek" },
+		]) {
+			expect(resolveModelConfig(m, base).cacheTtlMs).toBe(HOUR);
+		}
+	});
+
+	it("an undocumented family falls back to the same 1 h assumption", () => {
+		// z.ai and MiMo publish no TTL; luckily a wrong guess is not silent —
+		// /checkpoint-status prints the resolved delay and TTL.
+		expect(resolveModelConfig({ id: "glm-5.3-flash", provider: "z.ai" }, base).cacheTtlMs).toBe(HOUR);
+		expect(resolveModelConfig({ id: "MiMo-V2.6-Pro", provider: "opencode-go" }, base).cacheTtlMs).toBe(HOUR);
+		expect(resolveModelConfig({ id: "some-new-model", provider: "somewhere" }, base).cacheTtlMs).toBe(HOUR);
+	});
+
+	it("a config entry beats the family default, provider-qualified or bare", () => {
+		const cfg = {
+			...base,
+			models: {
+				"opencode-go/deepseek*": { threshold: 1000, cacheTtlMs: 10 * HOUR },
+				"openrouter/*": { threshold: 1000, cacheTtlMs: 24 * HOUR },
+			},
+		};
+		expect(resolveModelConfig({ id: "deepseek-v4.1-flash", provider: "opencode-go" }, cfg).cacheTtlMs)
+			.toBe(10 * HOUR);
+		expect(resolveModelConfig({ id: "deepseek/deepseek-v4-pro", provider: "openrouter" }, cfg).cacheTtlMs)
+			.toBe(24 * HOUR);
+		// z.ai is not covered by either entry → family/unknown path.
+		expect(resolveModelConfig({ id: "glm-5.3-flash", provider: "z.ai" }, cfg).cacheTtlMs).toBe(HOUR);
+	});
+
+	it("thresholds follow the same identity rule", () => {
+		const cfg = { ...base, models: { "opencode-go/*": { threshold: 0.5 } } };
+		expect(resolveThreshold({ id: "deepseek-v4.1-flash", provider: "opencode-go" }, 200_000, cfg)).toBe(100_000);
+		// Not covered by the entry → default 256000, capped to 0.8 × 200000.
+		expect(resolveThreshold({ id: "deepseek-v4.1-flash", provider: "openrouter" }, 200_000, cfg)).toBe(160_000);
+	});
+});
+
+// ---------------------------------------------------------------------------
 // Arming self-heal: nudge fires even when session_start saw no model
 // (the resumed / default-model case that left 95% of >250k sessions unsteered)
 // ---------------------------------------------------------------------------
@@ -91,19 +201,25 @@ describe("matchPattern", () => {
 describe("arming self-heal on turn_end", () => {
 	let dir: string;
 	const handlers = new Map<string, (event: any, ctx: any) => Promise<any> | any>();
+	const sentMessages: Array<{ message: any; options: any }> = [];
 
 	beforeAll(async () => {
 		dir = await mkdtemp(join(tmpdir(), "pi-acp-test-"));
 		await mkdir(join(dir, ".pi"), { recursive: true });
+		// cooldownMs: 0 so the multi-run test exercises the turn gate, not the timer.
 		await writeFile(
 			join(dir, ".pi", "auto-checkpoint.json"),
-			JSON.stringify({ defaultThreshold: 256000, cooldownTurns: 3, cooldownMs: 30000 }),
+			JSON.stringify({ defaultThreshold: 256000, cooldownTurns: 3, cooldownMs: 0 }),
 		);
 		const fakePi: any = {
 			on(event: string, handler: any) {
 				handlers.set(event, handler);
 			},
 			registerCommand() {},
+			registerEntryRenderer() {},
+			sendMessage(message: any, options: any) {
+				sentMessages.push({ message, options });
+			},
 		};
 		loadExtension(fakePi);
 
@@ -115,16 +231,32 @@ describe("arming self-heal on turn_end", () => {
 		try { await rm(dir, { recursive: true, force: true }); } catch {}
 	});
 
+	const model = { id: "deepseek/deepseek-v4-flash-0731", contextWindow: 1_048_576 };
+	// `dir` is assigned in beforeAll, so build the ctx lazily.
+	const overThreshold = () => ({
+		cwd: dir,
+		model,
+		getContextUsage: () => ({ tokens: 300_000, contextWindow: 1_048_576, percent: 28.6 }),
+	});
+
+	/** A turn that ended a run (stop) arms the next-prompt nudge; toolUse steers. */
+	const turn = (turnIndex: number, stopReason = "stop") => ({
+		type: "turn_end",
+		turnIndex,
+		message: { role: "assistant", stopReason },
+	});
+
+	async function freshSession() {
+		await handlers.get("session_start")!({ type: "session_start", reason: "new" }, { cwd: dir, model: undefined });
+		sentMessages.length = 0;
+	}
+
 	it("arms from ctx.model at turn_end and delivers the nudge at before_agent_start", async () => {
-		const model = { id: "deepseek/deepseek-v4-flash-0731", contextWindow: 1_048_576 };
-		const ctx = {
-			cwd: dir,
-			model,
-			getContextUsage: () => ({ tokens: 300_000, contextWindow: 1_048_576, percent: 28.6 }),
-		};
-		// Above the 256000 default threshold, past cooldown (turnIndex large,
-		// lastNudgedMs < 0 → msSinceLast = Infinity).
-		await handlers.get("turn_end")!({ type: "turn_end", turnIndex: 5 }, ctx);
+		await freshSession();
+		// Above the 256000 default threshold. Two turns clear the 3-turn cooldown
+		// from the -1 sentinel.
+		await handlers.get("turn_end")!(turn(0), overThreshold());
+		await handlers.get("turn_end")!(turn(1), overThreshold());
 
 		const res = await handlers.get("before_agent_start")!(
 			{ type: "before_agent_start" },
@@ -135,20 +267,236 @@ describe("arming self-heal on turn_end", () => {
 		expect(res.message.content).toContain("300,000");
 	});
 
-	it("does not nudge below the threshold", async () => {
-		const model = { id: "deepseek/deepseek-v4-flash-0731", contextWindow: 1_048_576 };
-		// Force a distinct model id so the lazy-derive re-arms cleanly, then a
-		// below-threshold usage must not pend a nudge.
-		const ctx = {
-			cwd: dir,
-			model,
-			getContextUsage: () => ({ tokens: 100_000, contextWindow: 1_048_576, percent: 9.5 }),
-		};
-		await handlers.get("turn_end")!({ type: "turn_end", turnIndex: 10 }, ctx);
+	it("counts cooldown turns across agent runs (turnIndex resets each prompt)", async () => {
+		await freshSession();
+		// Run 1: five turns, delivers a nudge, raising the turn watermark.
+		for (let i = 0; i < 5; i++) {
+			await handlers.get("turn_end")!(turn(i), overThreshold());
+		}
+		const run1 = await handlers.get("before_agent_start")!(
+			{ type: "before_agent_start" },
+			{ cwd: dir, model },
+		);
+		expect(run1).toBeDefined();
+
+		// Run 2: pi resets turnIndex to 0, but three real turns have elapsed, so
+		// the cooldown is satisfied and the nudge must fire again. Under the old
+		// `state.turnCounter = event.turnIndex` this was suppressed (0-5 < 3).
+		for (let i = 0; i < 3; i++) {
+			await handlers.get("turn_end")!(turn(i), overThreshold());
+		}
+		const run2 = await handlers.get("before_agent_start")!(
+			{ type: "before_agent_start" },
+			{ cwd: dir, model },
+		);
+		expect(run2).toBeDefined();
+	});
+
+	it("steers the nudge mid-run when the turn continues (toolUse)", async () => {
+		await freshSession();
+		// Three in-flight turns; the cooldown clears on the second.
+		for (let i = 0; i < 3; i++) {
+			await handlers.get("turn_end")!(turn(i, "toolUse"), overThreshold());
+		}
+		expect(sentMessages.length).toBe(1);
+		expect(sentMessages[0].options.deliverAs).toBe("steer");
+		expect(sentMessages[0].message.customType).toBe("auto-checkpoint");
+		expect(sentMessages[0].message.content).toContain("300,000");
+
+		// Steered, not armed — no before_agent_start delivery.
 		const res = await handlers.get("before_agent_start")!(
 			{ type: "before_agent_start" },
 			{ cwd: dir, model },
 		);
 		expect(res).toBeUndefined();
+	});
+
+	it("includes read regions tracked from tool_result", async () => {
+		await freshSession();
+		// ReadTracker stats the file, so recording is async.
+		await handlers.get("tool_result")!(
+			{ type: "tool_result", toolName: "read", isError: false, input: { path: "src/foo.ts", offset: 10, limit: 5 } },
+			overThreshold(),
+		);
+		await handlers.get("turn_end")!(turn(0), overThreshold());
+		await handlers.get("turn_end")!(turn(1), overThreshold());
+		const res = await handlers.get("before_agent_start")!(
+			{ type: "before_agent_start" },
+			{ cwd: dir, model },
+		);
+		expect(res.message.content).toContain("src/foo.ts");
+		expect(res.message.content).toContain("L10-14");
+	});
+
+	it("does not nudge below the threshold", async () => {
+		await freshSession();
+		const ctx = {
+			cwd: dir,
+			model,
+			getContextUsage: () => ({ tokens: 100_000, contextWindow: 1_048_576, percent: 9.5 }),
+		};
+		await handlers.get("turn_end")!(turn(10), ctx);
+		const res = await handlers.get("before_agent_start")!(
+			{ type: "before_agent_start" },
+			{ cwd: dir, model },
+		);
+		expect(res).toBeUndefined();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Idle compaction: a settled session above the threshold compacts itself after
+// IDLE_FRACTION × cacheTtlMs, so the next prompt does not re-read the whole
+// context at full price.
+// ---------------------------------------------------------------------------
+
+describe("idleCompactDelayMs", () => {
+	it("fires at 90% of the cache TTL (Claude Code runs 54 of 60 min)", () => {
+		expect(idleCompactDelayMs(5 * 60_000)).toBe(270_000);
+		expect(idleCompactDelayMs(60 * 60_000)).toBe(3_240_000);
+	});
+
+	it("a zero/negative TTL disables the timer", () => {
+		expect(idleCompactDelayMs(0)).toBe(0);
+		expect(idleCompactDelayMs(-1)).toBe(0);
+	});
+});
+
+describe("idle compaction", () => {
+	let dir: string;
+	const handlers = new Map<string, (event: any, ctx: any) => Promise<any> | any>();
+	const entries: Array<{ customType: string; data: any }> = [];
+	// A neutral id: per-model entries in the developer's live
+	// ~/.pi/agent/auto-checkpoint.json must not reach these assertions.
+	const model = { id: "idle-test/model", contextWindow: 1_048_576 };
+	const TTL_MS = 20; // → 18 ms idle delay
+	const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+	beforeAll(async () => {
+		dir = await mkdtemp(join(tmpdir(), "pi-acp-idle-"));
+		await mkdir(join(dir, ".pi"), { recursive: true });
+		loadExtension({
+			on(event: string, handler: any) {
+				handlers.set(event, handler);
+			},
+			registerCommand() {},
+			registerEntryRenderer() {},
+			appendEntry(customType: string, data: any) {
+				entries.push({ customType, data });
+			},
+			sendMessage() {},
+		} as any);
+	});
+	afterAll(async () => {
+		await handlers.get("session_start")!({ type: "session_start", reason: "new" }, { cwd: dir, model, mode: "tui" });
+		try { await rm(dir, { recursive: true, force: true }); } catch {}
+	});
+
+	/** Rewrite the project config, then start a fresh session with it. */
+	async function start(raw: Record<string, unknown>, ctx: Record<string, unknown> = {}) {
+		await writeFile(join(dir, ".pi", "auto-checkpoint.json"), JSON.stringify(raw));
+		await handlers.get("session_start")!({ type: "session_start", reason: "new" }, { cwd: dir, model, mode: "tui", ...ctx });
+	}
+
+	function idleCtx(overrides: Record<string, unknown> = {}) {
+		const calls: any[] = [];
+		const ctx: any = {
+			cwd: dir,
+			model,
+			mode: "tui",
+			hasUI: true,
+			ui: { notify() {} },
+			isIdle: () => true,
+			hasPendingMessages: () => false,
+			getContextUsage: () => ({ tokens: 300_000, contextWindow: 1_048_576, percent: 28.6 }),
+			compact: (options: any) => calls.push(options),
+			...overrides,
+		};
+		return { ctx, calls };
+	}
+
+	const base = { defaultThreshold: 1000, idleCompaction: true, cacheTtlMs: TTL_MS };
+
+	it("compacts once after an idle settle when above the threshold", async () => {
+		await start(base);
+		entries.length = 0;
+		const { ctx, calls } = idleCtx();
+		await handlers.get("agent_settled")!({ type: "agent_settled" }, ctx);
+		expect(calls.length).toBe(0); // not before the idle delay
+		await sleep(TTL_MS * 4);
+		expect(calls.length).toBe(1);
+
+		// The TUI marker is written on completion (pi.appendEntry, TUI-only, not
+		// in LLM context) so the user sees what happened when they come back.
+		calls[0].onComplete();
+		expect(entries.length).toBe(1);
+		expect(entries[0].customType).toBe("auto-checkpoint");
+		expect(entries[0].data).toMatchObject({ tokens: 300_000, percent: 28.6 });
+		expect(typeof entries[0].data.idleMinutes).toBe("number");
+	});
+
+	it("does not compact below the threshold", async () => {
+		await start(base);
+		const { ctx, calls } = idleCtx({
+			getContextUsage: () => ({ tokens: 500, contextWindow: 1_048_576, percent: 0.1 }),
+		});
+		await handlers.get("agent_settled")!({ type: "agent_settled" }, ctx);
+		await sleep(TTL_MS * 4);
+		expect(calls).toEqual([]);
+	});
+
+	it("stays off when disabled or the TTL is zero", async () => {
+		for (const raw of [{ ...base, idleCompaction: false }, { ...base, cacheTtlMs: 0 }]) {
+			await start(raw);
+			const { ctx, calls } = idleCtx();
+			await handlers.get("agent_settled")!({ type: "agent_settled" }, ctx);
+			await sleep(TTL_MS * 4);
+			expect(calls).toEqual([]);
+		}
+	});
+
+	it("stays off outside an interactive session", async () => {
+		// A subagent/RPC session is settled between driver commands that may
+		// arrive at any moment; compacting under it would summarise live context.
+		await start(base);
+		const { ctx, calls } = idleCtx({ mode: "rpc" });
+		await handlers.get("agent_settled")!({ type: "agent_settled" }, ctx);
+		await sleep(TTL_MS * 4);
+		expect(calls).toEqual([]);
+	});
+
+	it("re-checks at fire time: a run that resumed, or queued input, cancels it", async () => {
+		await start(base);
+		const running = idleCtx({ isIdle: () => false });
+		await handlers.get("agent_settled")!({ type: "agent_settled" }, running.ctx);
+		await sleep(TTL_MS * 4);
+		expect(running.calls).toEqual([]);
+
+		const queued = idleCtx({ hasPendingMessages: () => true });
+		await handlers.get("agent_settled")!({ type: "agent_settled" }, queued.ctx);
+		await sleep(TTL_MS * 4);
+		expect(queued.calls).toEqual([]);
+	});
+
+	it("a new turn cancels the pending idle timer", async () => {
+		await start(base);
+		const { ctx, calls } = idleCtx();
+		await handlers.get("agent_settled")!({ type: "agent_settled" }, ctx);
+		await handlers.get("turn_start")!({ type: "turn_start", turnIndex: 0, timestamp: Date.now() }, ctx);
+		await sleep(TTL_MS * 4);
+		expect(calls).toEqual([]);
+	});
+
+	it("per-model cacheTtlMs overrides the top-level value", async () => {
+		await start({
+			defaultThreshold: 1000,
+			idleCompaction: true,
+			cacheTtlMs: 0, // top level off …
+			models: { "idle-test/*": { threshold: 1000, cacheTtlMs: TTL_MS } }, // … this model on
+		});
+		const { ctx, calls } = idleCtx();
+		await handlers.get("agent_settled")!({ type: "agent_settled" }, ctx);
+		await sleep(TTL_MS * 4);
+		expect(calls.length).toBe(1);
 	});
 });

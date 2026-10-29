@@ -53,3 +53,9 @@ before adding more machinery.
 > `AGENTS.md` to the global `APPEND_SYSTEM.md` — *Structural audits at chunk
 > boundaries*. It is repo-independent process, so it belongs in the shared prompt;
 > `docs/investigations/structure-trend.md` stays the per-repo artifact.
+
+> **Superseded in part (2026-10-21):** growth is no longer an optional observation, and the
+> chunk-boundary audit no longer just folds candidates into the next chunk. Growth and parallel
+> mechanisms are strikes on a refactor-needed register, two strikes close an area, and
+> `REFACTOR FIRST` refusals apply. The snapshot convention stands. See
+> [040-refactor-first](040-refactor-first.md).

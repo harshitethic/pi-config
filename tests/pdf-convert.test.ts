@@ -347,7 +347,7 @@ describe("real PDF conversion (end-to-end)", () => {
 			expect(result.markdown).toMatch(/Hello PDF World/i)
 			console.log(`Real conversion: engine=${result.engine}, output=${result.markdown.slice(0, 80)}...`)
 		}
-	})
+	}, 60_000)
 })
 
 // ── 6. buildFetchPdfResponse ─────────────────────────────────────────────

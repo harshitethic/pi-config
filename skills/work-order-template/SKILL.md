@@ -32,11 +32,46 @@ Your work order quality directly determines whether the implementer succeeds on 
 
 **Goal**: <the specific outcome the implementer must produce — not the "how," the "what">
 
+### Premise
+
+<The one fact the specified mechanism depends on, and the probe that would falsify it.> If falsified:
+stop, report `PREMISE FALSIFIED` with the evidence; nothing lands.
+
+### Preparatory refactor
+
+Required (decision subagents/040: make the change easy, then make the easy change). Fill in one
+of:
+
+- **Refactor commit:** a behaviour-preserving refactor that lets the area take the change
+  without a second path. That means extending the existing mechanism, not copying it; folding
+  duplicated structure before adding a branch; or extracting before growing a large file or
+  function. Name the characterization tests that pin the behaviour it preserves, and add them
+  first where coverage is thin. The same implementer does the refactor and then the change, and
+  asks for one standard review, preferably with two commits: the refactor (green, existing tests
+  unchanged), then the change. Use a separate order only when the refactor belongs to another
+  chunk or is too large to review alongside the change.
+- **`none`**, with a one-line reason that holds against the code. For example: "the change
+  extends `X` at one site; no copy, no branch on duplicated structure".
+
+Census the area before writing `none`. Grep for an existing mechanism the change would
+duplicate, and check the repo's refactor-needed register (`docs/investigations/structure-trend.md`).
+A closed area needs its refactor scheduled first, as this commit or as an earlier order. It never
+gets a note saying the debt will be folded later.
+
+### Rejected alternatives
+
+Only alternatives the owner rejected, each citing its ruling (decision, registry row or brief with
+date). Never filled from the order author's own reasoning; omit the section when there are none.
+Landing a listed alternative is not this work order.
+
 ### Scope
 
-**Files to modify** (list every file the implementer is expected to touch):
+**Invariants** (the blast radius — what must not change): <behaviour, layouts, passes or files that
+must stay untouched, and why>. Scope is these invariants, not a file list: an implementer may edit a
+file not named below when the invariants hold, and lists it under `unexpected_changes` with why.
+
+**Files expected to change** (guidance, not a limit):
 - `path/to/file.rs` — <what changes in this file>
-- `path/to/other.rs` — <what changes in this file>
 
 **Files to read (reference only, do not modify)**:
 - `path/to/reference.rs` — <why the implementer needs to read this>
@@ -64,6 +99,13 @@ For a refactor (extract, merge, move), the boundary's **existing** rows
 are the acceptance evidence: name them, and make characterization rows
 step 0 where the touched behaviour is not pinned. An existing row that
 must change means behaviour changed.
+
+For a rule that must hold on **every** path (all constructions of a type, all
+expected-type sites, all callers of a check), count the producers before
+writing the steps (`rg` the constructor). More than one means step 1 funnels
+them into one type-enforced path behind characterization rows, and the rule
+lives in the funnel. Never specify the rule as a list of paths each handled;
+the list goes in the acceptance rows as a lower bound.
 
 **Behavior and failure matrix**: <the cases the implementation must
 satisfy, organized as a non-overlapping matrix that the test reviewer
@@ -166,6 +208,7 @@ Known risk patterns for this task type. The implementer must explicitly check fo
 - [ ] **No unrequested changes**: No files, routes, or structures modified beyond what the work order specifies
 - [ ] **Build config untouched**: Build configuration (tsconfig, Cargo.toml, CMakeLists) not modified unless explicitly requested
 - [ ] **No unsolicited features**: No features, refactors, or "improvements" added that were not requested in the work order
+- [ ] **No parallel path**: No second implementation of an existing mechanism, copied block, or branch on duplicated structure. If the change needs one, stop and return `REFACTOR FIRST`
 
 > The implementer must check every box above. If any check fails, the implementer must fix the issue before reporting completion or flag it in the completion report.
 

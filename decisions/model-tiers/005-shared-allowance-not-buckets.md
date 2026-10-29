@@ -1,0 +1,85 @@
+---
+title: "Go plan allowance is shared + weighted — per-model figures are solo capacity, not buckets"
+type: decision
+status: done
+date: 2026-10-18
+---
+
+# Shared normalized allowance (mechanism correction to 004's framing)
+
+**Finding (verified 2026-10-18, source + vendor support):** OpenCode Go does **not** enforce
+per-model monthly buckets. All paid models draw from **one shared normalized allowance**;
+each request costs `round(cost × costMultiplier)` against a single per-workspace counter,
+where `costMultiplier = planWideLimit ÷ listedLimit_m`. The per-model monthly figures
+($160 DS-Flash, $180 GLM-Flash, $60 MiMo-Pro, … on Go Plus) answer only "how much of this
+one model alone could you burn with the whole allowance".
+
+Evidence: opencode `packages/console` — `validateBilling` accumulates into one `LiteTable`
+row per workspace+user; `getModelQuotaLimit(planWideLimit, multiplier)` derives the displayed
+per-model figures. Vendor support, quoted publicly in
+`github.com/anomalyco/opencode#54875`: "The 'Monthly limit' for each model is how much of
+that model alone you could use with the full allowance. It is not a separate budget for
+that model."
+
+**The meter:** plan-wide monthly consumption = `Σ (real$ on model m ÷ listedLimit_m)`,
+capped at 1.0 (the plan-wide constant cancels — Go's is $60 normalized; Go Plus's is
+unpublished and unneeded). `/zen/go/v1/usage`'s monthly % is this meter server-side.
+
+**Enforcement and bypass** (full support quote, re-verified 2026-10-18): HTTP 429 hard block
+until the window resets — no grace margin, no overage billing. **Free models keep working**
+after exhaustion. Optional console "Use balance" falls back to Zen credits (PAYG) instead of
+blocking. The 5h window is an **anchored reset** (cleared only when the last update ages out),
+not a sliding window. The quote's worked example pins the weighting: "$1 of GLM-5.3-Flash
+usage uses the same share of your allowance as $0.25 of Kimi K3 usage" (= 60/15).
+
+**Provenance gap:** the Go *Plus* per-model figures (160/180/60/60) are console-researched
+(WO-2026-053 scout). Web research 2026-10-18: qcode.cc's Go guide (updated 2026-10-15)
+corroborates DS-Flash $160 and adds Kimi K3 $60, Qwen3.8 Max $60, **GLM-5.3 (full) $120**
+(the promotion path ceiling — was wrongly "unrecorded" in 038/TODO). Multipliers are
+non-uniform by design (2×/4×/8×; OpenCode: bulk discounts + reserved GPU capacity make
+higher limits possible; already-discounted public pricing gets lower). The scout's GLM-Flash
+$180 / MiMo-Pro $60 / DS-Pro $60 fit the pattern but stay single-sourced. Limits are
+volatile (OpenCode: "usage limits may change as it learns from early usage"). Third-party
+guides (qcode, bitdoze) read the docs as per-model budgets — the misleading presentation
+the GitHub issue calls out; the shared-weighted mechanism rests on the support quote +
+console source, which outrank them. The docs' limit column ($80/60/15/15) is the **Go**
+plan. Seat conclusions only need the GLM/MiMo limit ratio ≥ 1.76 (scout: 3×, docs column:
+4× — both safe); a true ratio < 1.76 would flip the per-token meter ranking. Also:
+DeepSeek ZDR agreement runs through 2026-10-31 (renewed monthly) — DS-seat data-retention
+terms change if it lapses.
+
+**What this corrects:**
+- 036's "three separate buckets" and any additive headroom arithmetic (including
+  2026-10-18's seat-sustainability analysis: per-model capacities do not sum; a seat can be
+  simultaneously "under its bucket" and the reason the plan 429s).
+- "What happens at bucket exhaustion is unknown" — settled: 429 until reset.
+
+**What survives 004 unchanged:** effective monthly volume (listedLimit ÷ blended $/M) is
+exactly "tokens of this model per full allowance" — still the right seat-pick comparison,
+and bigger remains better. The correction is only to *aggregation*: compare models with it,
+but judge a fleet's sustainability against the shared meter, weighted by `1 ÷ listedLimit`.
+Practical consequence: tokens on a $60-listed model weigh 3× a $180-listed model per real
+dollar; per raw token the gap widens further with the burn rate (MiMo-Pro ≈ 18× GLM-5.3-Flash
+at observed cache-heavy mix).
+
+**Price resolution (2026-10-18, later):** the console docs table
+(opencode.ai/v2/docs/console/go/, fetched 2026-10-18) **publishes cache-read for every
+model** — 036's "no cache-read price" capture was incomplete. GLM-5.3-Flash cache-read
+**$0.03/M** (its window burn triples to $13.38, matching pi-recorded exactly); MiMo-Pro
+cache **$0.003625** (the 0.036 OpenRouter placeholder was 10× high); DS-V4-Pro cache
+$0.022/0.044 peak. The meter's ±2× band collapses. Corrected window (Oct 17–18):
+meter 0.124/2d, composition **GLM-Flash 60% / MiMo-Pro 33% / DS-Flash 7%** — the big
+GLM-Flash volume (reviewers + triage + mains), not MiMo, is the largest meter consumer.
+Corrected per-token meter weights: DS 5.4e-5, GLM 2.2e-4, MiMo 3.8e-4 per token — **MiMo is
+1.7× GLM (not 18×), GLM 4.1× DS**. Corrected solo monthly throughput: **DS-Flash ≈ 13–18B
+tokens/mo is the throughput king** (cache-read priced, two sources agree exactly);
+GLM-Flash ≈ 4.5B/mo; MiMo-Pro ≈ 2.6B/mo. The earlier "GLM = throughput king" and "18×"
+claims were artifacts of GLM's unpriced cache floor + MiMo's 10× placeholder. Seat moves
+survive on direction (GLM still 1.7× lighter than MiMo on the meter, and real-$ per token
+is 1.8× HIGHER for GLM — the meter, not dollars, is the binding constraint), but the
+magnitude rationale in 038 is superseded by this note. Window thresholds per the docs:
+5h = 20% of the allowance, weekly = 50%, monthly = 100%.
+
+**Files changed:** this record, `decisions/model-tiers/README.md`, `docs/model-role-scores.md`
+(cost-methodology note), `docs/TODO.md` (bucket wording). Measurement tool
+(`docs/data/seat_burn.py`, WO-2026-053) reports the meter.
