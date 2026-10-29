@@ -20,12 +20,20 @@ covers `deepseek-v4.1-flash` through opencode-go and
 `deepseek/deepseek-v4-pro` through openrouter; `opencode-go/*` or `z.ai/*` scope
 a whole route. Thresholds and every other per-model field use the same matcher.
 
-**TTL resolution.** `FAMILY_CACHE_TTL_MS` holds documented lifetimes keyed by
-family token (any version, any route): DeepSeek 3 h — the low end of "a few
-hours to a few days" (api-docs.deepseek.com/guides/kv_cache) — and Claude /
-Anthropic 5 min, the default that only rises to 1 h when the request asks for
-`ttl: "1h"`. Everything else gets `cacheTtlMs`, default **1 h**. A config
-`models` entry beats both.
+**TTL resolution.** `FAMILY_CACHE_TTL_MS` holds lifetimes that are documented
+as *facts*, keyed by family token (any version, any route): Claude / Anthropic
+5 min, rising to 1 h only when the request asks for `ttl: "1h"`. Everything else
+gets `cacheTtlMs`, default **1 h**. A config `models` entry beats both.
+
+DeepSeek is deliberately not in that table, on any route. Its docs say the cache
+"works on a best-effort basis" and is cleared "usually within a few hours to a
+few days" (api-docs.deepseek.com/guides/kv_cache) — a typical range, not a
+minimum — and OpenCode Go's DeepSeek route publishes no lifetime of its own (its
+inference docs only report `cache_read` / `cache_write_5m` / `cache_write_1h`
+accounting, and the Go price list mirrors DeepSeek's own peak/off-peak rates, so
+the cache is DeepSeek's with no added guarantee). "Usually hours" is not "always
+more than an hour", so DeepSeek runs the 1 h default too. Do not raise it
+without evidence of a floor.
 
 **Why before expiry.** The summarization request is the one call that must read
 the entire context; before expiry it reads at cache-read price, after expiry at
@@ -34,12 +42,15 @@ after expiry therefore cannot beat doing nothing for the first resumed turn, and
 only wins if the session continues several turns. Claude Code uses the same
 shape: 54 minutes of a 1 h cache, ≥200k tokens.
 
-**Why 1 h for an unknown family.** The documented lifetimes span 5 min to days,
-and z.ai and MiMo publish none. Guessing short compacts sessions whose cache was
-still warm (detail lost for a summary that cost pennies); guessing long can pay
-the full input price for the summary read. An hour sits between the extremes and
-matches the session lengths this repo actually has. 5 min would be wrong here:
-it is Anthropic's number, Claude is not used through pi, and it is the outlier.
+**Why 1 h rather than a family guess.** The documented lifetimes span 5 min to
+days, and only Anthropic publishes a number that binds. Guessing short compacts
+sessions whose cache was still warm (detail lost for a summary that cost
+pennies); guessing long can pay the full input price for the summary read — but
+guessing a family long on a *typical range* rather than a floor silently assumes
+the case we cannot verify. One hour is the assumption we can defend for every
+route we use, and it matches the session lengths this repo actually has. 5 min
+would be wrong: it is Anthropic's number, Claude is not used through pi, and it
+is the outlier.
 
 **Why TUI only.** Subagent and RPC sessions are settled between commands their
 driver may issue at any moment; compacting under one would summarize context

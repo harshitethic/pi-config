@@ -59,13 +59,14 @@
  * checkpoint. When a custom prompt is set explicitly at the model or top level,
  * the degradation flag is ignored.
  *
- * cacheTtlMs is the provider's prompt-cache lifetime, not a pi setting: the
- * documented values differ by an order of magnitude (Anthropic 5 min, with a
- * 1 h option; DeepSeek disk cache "a few hours to a few days"; z.ai and MiMo
- * publish no TTL). `FAMILY_CACHE_TTL_MS` carries the documented families;
- * everything else gets `cacheTtlMs` (1 h). `idleCompaction: false` or
- * `cacheTtlMs: 0` turns the timer off for a model whose cache outlives the
- * session's usefulness.
+ * cacheTtlMs is the provider's prompt-cache lifetime, not a pi setting. Only
+ * lifetimes that are documented as facts get a sentence below; everything else
+ * gets `cacheTtlMs` (1 h). Anthropic documents 5 min (1 h on request). DeepSeek
+ * documents only a typical range ("usually within a few hours to a few days")
+ * and OpenCode Go a route over it with no TTL of its own, so DeepSeek runs on
+ * the 1 h default too: "usually hours" is not "always more than an hour".
+ * z.ai and MiMo publish no TTL. `idleCompaction: false` or `cacheTtlMs: 0`
+ * turns the timer off for a model whose cache outlives the session's usefulness.
  */
 
 import { readFile } from "node:fs/promises";
@@ -259,12 +260,15 @@ export function resolveThreshold(
  * assuming long can pay the full input price for the summary read.
  */
 const FAMILY_CACHE_TTL_MS: ReadonlyArray<readonly [pattern: string, ttlMs: number]> = [
-	// "Cache ... will be automatically cleared, usually within a few hours to a
-	// few days." (api-docs.deepseek.com/guides/kv_cache) — the low end of that.
-	["*deepseek*", 3 * 60 * 60_000],
-	// Anthropic's default; 1 h only when the request asks for `ttl: "1h"`.
+	// Anthropic documents the lifetime: 5 min, 1 h when the request asks for
+	// `ttl: "1h"`.
 	["*claude*", 5 * 60_000],
 	["*anthropic*", 5 * 60_000],
+	// DeepSeek is deliberately absent. Its cache "works on a best-effort basis"
+	// and is cleared "usually within a few hours to a few days"
+	// (api-docs.deepseek.com/guides/kv_cache) — a typical range, not a floor, and
+	// OpenCode Go's DeepSeek route publishes no lifetime of its own. "Usually
+	// hours" is not "always more than an hour", so it takes the 1 h default.
 ];
 
 /**

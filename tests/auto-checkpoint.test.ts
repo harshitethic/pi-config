@@ -139,13 +139,6 @@ describe("resolveModelConfig identity + family TTL", () => {
 
 	it("a documented family keeps its TTL through every route and version", () => {
 		for (const m of [
-			{ id: "deepseek-v4.1-flash", provider: "opencode-go" },
-			{ id: "deepseek/deepseek-v4-pro", provider: "openrouter" },
-			{ id: "deepseek-v5", provider: "z.ai" },
-		]) {
-			expect(resolveModelConfig(m, base).cacheTtlMs).toBe(3 * HOUR);
-		}
-		for (const m of [
 			{ id: "claude-opus-4-7", provider: "anthropic" },
 			{ id: "anthropic/claude-sonnet-5", provider: "openrouter" },
 		]) {
@@ -153,7 +146,22 @@ describe("resolveModelConfig identity + family TTL", () => {
 		}
 	});
 
-	it("an undocumented family falls back to the 1 h assumption", () => {
+	it("a family with only a typical range falls back to the 1 h assumption", () => {
+		// DeepSeek documents "usually within a few hours to a few days" — a range,
+		// not a floor — and OpenCode Go publishes no TTL for its DeepSeek route.
+		// Nothing guarantees more than an hour, so DeepSeek gets the default.
+		// Do not raise this without evidence of a minimum lifetime.
+		for (const m of [
+			{ id: "deepseek-v4.1-flash", provider: "opencode-go" },
+			{ id: "deepseek/deepseek-v4-pro", provider: "openrouter" },
+			{ id: "deepseek-v5", provider: "z.ai" },
+			{ id: "deepseek-flash", provider: "deepseek" },
+		]) {
+			expect(resolveModelConfig(m, base).cacheTtlMs).toBe(HOUR);
+		}
+	});
+
+	it("an undocumented family falls back to the same 1 h assumption", () => {
 		// z.ai and MiMo publish no TTL; luckily a wrong guess is not silent —
 		// /checkpoint-status prints the resolved delay and TTL.
 		expect(resolveModelConfig({ id: "glm-5.3-flash", provider: "z.ai" }, base).cacheTtlMs).toBe(HOUR);
