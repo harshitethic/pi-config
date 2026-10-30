@@ -48,3 +48,14 @@ Per-seat conclusions: implementer/reviewers `:high` = the vendor's everyday-agen
 **Files changed:** `agents/{orchestrator,implement,review-code,review-plan,review-tests,scout-code,scout-web,math-algo-oracle}.md` (model lines), `extensions/lib/fleet-model.ts` (reduced to `FLEET_PROVIDER`/`FLEET_MODEL`), `extensions/subagent-async/index.ts` (fallback + comments), `extensions/compaction-model.ts` (constant seat), `extensions/fleet-model.ts` (deleted), `settings.json` (command unregistered; default provider/model already flipped by the user), `models.json` (pin moved), `tests/fleet-model.test.ts` (deleted), `docs/model-role-scores.md`, `docs/thinking-levels.md`, `docs/TODO.md`, `README.md`, decisions index, supersession footnotes on 020/021, this decision.
 
 **Test coverage:** the deleted matrix tested a mechanism that no longer exists; nothing replaces it. The wiring left is a constant passed to existing spawn/compaction call paths (unchanged shapes), covered by the suite's existing subagent/compaction tests. E2E: a live spawn after `/reload` records `deepseek/deepseek-v4.1-flash:*` in its `meta.json`.
+
+---
+
+> **Addendum (2026-10-18, [decision 035](035-flash-1017-refresh.md)):** the fleet model id moved to
+> the Oct 17 checkpoint, `deepseek/deepseek-v4.1-flash-1017` — same seat split, same effort levels,
+> same routing pin shape; the 0910 id above is the id this decision adopted.
+
+> **Addendum (2026-10-22, [decision 041](041-glm-review-seats-openrouter.md)):** the “no z.ai
+> subscription” bound in Why item 1 describes the z.ai-subscription era only. `z-ai/glm-5.3-flash`
+> runs on OpenRouter pay-per-token and serves the three review seats from 2026-10-22 (041); the
+> DeepSeek seats' OpenRouter routing this decision chose is itself superseded by 036.

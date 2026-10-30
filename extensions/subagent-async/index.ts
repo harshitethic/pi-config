@@ -6,7 +6,7 @@
  * at any time. Results are delivered as injected user messages.
  */
 
-import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { execFileSync, spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as net from "node:net";
@@ -17,7 +17,37 @@ import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-age
 import { CustomEditor, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { type AgentConfig, type AgentScope, discoverAgents } from "./agents.ts";
-import { FLEET_MODEL } from "../lib/fleet-model.ts";
+import { FLEET_MODEL_SPEC } from "../lib/fleet-model.ts";
+import { validateOwnerAsks } from "../lib/owner-row.ts";
+import {
+	SUBAGENT_STALE_TURN_MS,
+	decideRecoveryAdoption,
+	defaultOwnerProbe,
+	gatherSubagentDiskFacts,
+	hasTerminalFooter,
+	isOwnerAlive,
+	listSubagentMetas,
+	processStartToken,
+	readSubagentState,
+	resumeCallFor,
+	selfStartToken,
+	type OwnerProbe,
+} from "../lib/subagent-state.ts";
+
+// The 027 ownership gate and the R3-3 state vocabulary live in
+// ../lib/subagent-state.ts so checkpoint reads the same registry with the same
+// predicate (R3-1). Re-exported here: these names are the module's public
+// surface for the existing tests and importers.
+export {
+	SUBAGENT_STALE_TURN_MS,
+	decideRecoveryAdoption,
+	defaultOwnerProbe,
+	isOwnerAlive,
+	processStartToken,
+	selfStartToken,
+	type OwnerProbe,
+	type RecoveryAdoption,
+} from "../lib/subagent-state.ts";
 import { matchesKey, Key, truncateToWidth } from "@earendil-works/pi-tui";
 
 // ── Constants ───────────────────────────────────────────────────────────────
@@ -31,7 +61,6 @@ const HARD_KILL_DELAY_MS = 5000;
 // so it can inspect progress with subagent_status or stop it with
 // subagent_stop. The watchdog resets on every assistant turn, so it
 // only fires when the subagent is genuinely stuck.
-const SUBAGENT_STALE_TURN_MS = 5 * 60 * 1000; // 5 minutes
 // Decision 015 stage-2: a child SILENT for SILENCE_TIMEOUT_DEFAULT_MS (no
 // activity in the decision-015 signal union — tools, LLM streaming, retries,
 // logs; per `lastActivityMs` tracking) is
@@ -237,153 +266,33 @@ export function readMetaJson(sessionId: string): Record<string, any> | null {
 
 /** Update an existing meta file by merging fields (read-modify-write, atomic). */
 export function updateMetaJson(sessionId: string, updates: Record<string, any>): void {
+	if (readMetaJson(sessionId) === null) {
+		// No readable meta (missing or malformed): write the updates alone, as
+		// before. Mirrored by test-resume.cjs — keep in sync.
+		writeMetaJson(sessionId, updates);
+		return;
+	}
+	updateMetaAt(metaPath(sessionId), updates);
+}
+
+/** Merge `updates` into the meta file at `file` (read-modify-write, atomic).
+ *  Split out so the reap can write back into its injected registry directory. */
+export function updateMetaAt(file: string, updates: Record<string, any>): void {
 	try {
-		const existing = readMetaJson(sessionId) ?? {};
+		const existing = JSON.parse(fs.readFileSync(file, "utf-8"));
 		const merged = { ...existing, ...updates };
-		writeMetaJson(sessionId, merged);
+		const tmp = `${file}.tmp.${process.pid}`;
+		fs.writeFileSync(tmp, JSON.stringify(merged, null, 2));
+		fs.renameSync(tmp, file);
 	} catch (e) {
-		debugLog(`updateMetaJson: failed: ${e instanceof Error ? e.message : String(e)}`);
+		debugLog(`updateMetaAt: failed: ${e instanceof Error ? e.message : String(e)}`);
 	}
 }
 
 // ── Recovery ownership ─────────────────────────────────────────────────────
-//
-// The session_start recovery scan re-attaches to subagent sockets left behind
-// by a previous session. Before decision 027 it adopted EVERY socket with a
-// matching meta file — including children owned by other, still-live pi
-// processes. The adopted client connections kept the event loop referenced, so
-// `pi -p` hung until a stranger's child finished, and that child's completion
-// was delivered into the wrong session as "[Isolation] Recovered". The scan now
-// gates adoption on the spawning process's identity, recorded at spawn:
-//
-//   ownerPid         the spawning process's pid
-//   ownerStartToken  an OS start-time token, so a recycled pid is not mistaken
-//                    for the original owner (pid reuse is real: see the peer
-//                    note in decision 027)
-//
-// Adopt only when the owner is THIS process (a previous session in the same
-// process — /reload, /new still hold the old socket server open) or the owner
-// process is gone. A live FOREIGN owner means the child belongs to another
-// session and must be left alone.
-//
-// Legacy metas (written before 027) carry no owner fields. Ownership cannot be
-// established, so they are SKIPPED: adopting a stranger is the bug being fixed,
-// while a false "owner alive" only skips a best-effort recovery — the safe
-// direction.
-
-export interface OwnerProbe {
-	/** True while a process with this pid exists. */
-	exists(pid: number): boolean;
-	/** OS start-time token for the pid, or null when unavailable. */
-	startToken(pid: number): string | null;
-}
-
-/** Default real-OS probe. `exists` uses signal 0; EPERM still means alive.
- *  Exported for unit testing. */
-export const defaultOwnerProbe: OwnerProbe = {
-	exists(pid: number): boolean {
-		try {
-			process.kill(pid, 0);
-			return true;
-		} catch (e) {
-			return (e as NodeJS.ErrnoException)?.code === "EPERM";
-		}
-	},
-	startToken(pid: number): string | null {
-		return processStartToken(pid);
-	},
-};
-
-/**
- * OS start-time token for a pid, used to make pid liveness pid-reuse-safe.
- * Linux: field 22 (`starttime`, clock ticks since boot) from /proc/<pid>/stat.
- * macOS/BSD: `ps -o lstart=` (1s resolution — good enough to separate a reused
- * pid, and the pid must still exist for a match to happen at all). Returns null
- * when the process is gone or the platform cannot report the token. Exported
- * for unit testing.
- */
-export function processStartToken(pid: number, platform: string = process.platform): string | null {
-	if (!Number.isInteger(pid) || pid <= 0) return null;
-	try {
-		if (platform === "linux") {
-			const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf-8");
-			const close = stat.lastIndexOf(")");
-			if (close < 0) return null;
-			// After "pid (comm) " comes field 3 (state). starttime is field 22,
-			// i.e. index 19 of the whitespace-split remainder.
-			const fields = stat.slice(close + 2).trim().split(/\s+/);
-			return fields[19] ?? null;
-		}
-		const out = execFileSync("ps", ["-o", "lstart=", "-p", String(pid)], {
-			encoding: "utf-8",
-			stdio: ["ignore", "pipe", "ignore"],
-		});
-		const token = out.trim();
-		return token.length > 0 ? token : null;
-	} catch {
-		return null;
-	}
-}
-
-/** Cached start token for THIS process, written into meta at spawn. Exported
- *  for unit testing. */
-let selfStartTokenCache: string | null | undefined;
-export function selfStartToken(): string | null {
-	if (selfStartTokenCache === undefined) selfStartTokenCache = processStartToken(process.pid);
-	return selfStartTokenCache;
-}
-
-/**
- * pid-reuse-safe "is the recorded owner still alive?" — pure over the injected
- * probe. The recorded start token must match the current one; a mismatch means
- * the pid was recycled and the original owner is gone. When the pid exists but
- * its current token cannot be read, assume ALIVE: skipping recovery is the safe
- * direction, adopting a stranger is not.
- *
- * A missing/invalid `ownerPid` also returns true — there is no recorded owner
- * to prove gone, so callers that use this predicate alone still fail safe.
- * (The legacy policy itself is `decideRecoveryAdoption`'s "skip-legacy".)
- * Exported for unit testing.
- */
-export function isOwnerAlive(
-	meta: Record<string, any> | null | undefined,
-	probe: OwnerProbe = defaultOwnerProbe,
-): boolean {
-	const pid = meta?.ownerPid;
-	if (!Number.isInteger(pid) || pid <= 0) return true; // no recorded owner → not provably gone
-	if (!probe.exists(pid)) return false;
-	const current = probe.startToken(pid);
-	if (current === null) return true; // exists, token unknown → assume alive
-	const recorded = meta?.ownerStartToken;
-	if (typeof recorded !== "string" || recorded.length === 0) return true; // cannot disprove
-	return current === recorded;
-}
-
-export type RecoveryAdoption = "adopt" | "skip-live-owner" | "skip-legacy";
-
-/**
- * Decide whether the recovery scan may adopt the socket described by `meta`.
- * Pure and injectable so the adopt/skip matrix is unit-testable without
- * touching /tmp or the real OS.
- *
- * A same-process owner (pid === selfPid) is adopted even though it is alive:
- * the previous session in THIS process left the socket server running
- * (/reload, /new), and re-attaching to it is the recovery path the scan exists
- * for. A live FOREIGN owner is skipped — that is the stranger-adoption bug.
- * Exported for unit testing.
- */
-export function decideRecoveryAdoption(
-	meta: Record<string, any> | null | undefined,
-	opts: { selfPid?: number; probe?: OwnerProbe } = {},
-): RecoveryAdoption {
-	const pid = meta?.ownerPid;
-	if (!Number.isInteger(pid) || pid <= 0) return "skip-legacy";
-	// pid === self: either our own previous session (adopt), or a recycled pid
-	// whose original owner process is gone (also adopt). Both are safe, so the
-	// start-token comparison is unnecessary for this branch.
-	if (pid === (opts.selfPid ?? process.pid)) return "adopt";
-	return isOwnerAlive(meta, opts.probe ?? defaultOwnerProbe) ? "skip-live-owner" : "adopt";
-}
+// Moved to ../lib/subagent-state.ts so checkpoint's in-flight section (R3-1)
+// shares 027's gate instead of re-deriving it; re-exported at the top of this
+// file for the existing importers.
 
 /** The non-owner fields persisted to the meta file at spawn. */
 export interface SpawnMetaFields {
@@ -400,6 +309,8 @@ export interface SpawnMetaFields {
 	systemPrompt?: string;
 	allowedSubagents: string[];
 	excludeTools: string[];
+	/** Set when the spawn opened a work-order record; resume and recovery complete it. */
+	workRecord?: WorkRecord;
 }
 
 /**
@@ -414,6 +325,23 @@ export function buildSpawnMeta(
 	owner: { pid: number; startToken: string | null } = { pid: process.pid, startToken: selfStartToken() },
 ): Record<string, any> {
 	return { ...fields, ownerPid: owner.pid, ownerStartToken: owner.startToken };
+}
+
+/**
+ * R4: does this agent's completion-report schema declare `owner_asks`?
+ *
+ * The gate is live only where the field is declared (agents/implement.md,
+ * agents/orchestrator.md): scouts, reviewers and the other report shapes are
+ * untouched. Derived from the prompt mechanically — no agent-name list, no new
+ * frontmatter key — so a future report-producing agent inherits the gate by
+ * declaring the field in its own schema. Exported for unit testing.
+ */
+export function reportDeclaresOwnerAsks(systemPrompt: string | null | undefined): boolean {
+	if (typeof systemPrompt !== "string") return false;
+	// Case-insensitive: a prompt spelling the field `OWNER_ASKS:` declares the
+	// same schema, and silently leaving it ungated is the failure this gate
+	// exists to prevent. Only the two report-schema prompts contain the token.
+	return /(^|\n)[ \t]*(?:[-*][ \t]+)?\**owner_asks\**[ \t]*:/i.test(systemPrompt);
 }
 
 /**
@@ -525,7 +453,13 @@ export function describeUnknownSession(idQuery: string): string {
 	}
 
 	const { sid, meta } = resolved;
-	const parts = [`Session ${sid} is not attached to this session's tracker.`];
+	// R3-3: the answer leads with the classified state and the evidence it was
+	// read from, so one word never has to carry "may have finished or stopped".
+	const reading = readSubagentState(gatherSubagentDiskFacts(sid, { meta }));
+	const parts = [
+		`State: ${reading.state} — ${reading.evidence}.`,
+		`Session ${sid} is not attached to this session's tracker.`,
+	];
 	const recordedPid = meta.ownerPid;
 	const sock = `/tmp/pi-subagent-${sid}.sock`;
 	// Report the facts that were checked, never a fact the code did not observe.
@@ -557,6 +491,17 @@ export function describeUnknownSession(idQuery: string): string {
 	if (meta.isolationBranch) parts.push(`Branch: ${meta.isolationBranch}.`);
 	if (meta.worktreePath) parts.push(`Worktree: ${meta.worktreePath}.`);
 	parts.push(`Log: /tmp/pi-subagent-${sid}.log`);
+	// R3-2 reap kept a finished child's dirty tree: the work is still on disk and
+	// resumable, so the answer says so — with the WO's own label for it — instead
+	// of reporting a bare completion.
+	if (meta.worktreeKept) {
+		parts.push(
+			`Uncommitted work kept in ${meta.worktreePath ?? "the worktree"} ` +
+				`(${meta.worktreeKept?.reason ?? "uncommitted work"}) — orphaned-resumable: ${resumeCallFor(sid, meta)}`,
+		);
+	}
+	// R3-3: an orphaned session is the recoverable one — say so with the call.
+	if (reading.state === "orphaned") parts.push(`Resume with: ${resumeCallFor(sid, meta)}`);
 	return parts.join(" ");
 }
 
@@ -746,6 +691,12 @@ interface RunningSubagent {
 	// Reviewer invocation guard: the parent agent's declared requirements.
 	// Empty / undefined means "no gate applies" (the soft-prompt check is a no-op).
 	reviewParentRequirements?: ReviewerKind[];
+	// R4 owner-asks gate: set when the agent's report schema declares the
+	// `owner_asks` field, so its completion report is refused unless the field is
+	// well-formed. Derived from the agent prompt, never a name list.
+	ownerAsksRequired?: boolean;
+	workRecord?: WorkRecord; // set when the spawn passed workOrderPath (decisions/work-order-records/001)
+	recordNotes?: string[]; // failed record writes, surfaced in status and the delivered result
 	// Worktree isolation
 	worktreePath: string | null;
 	isolationBranch: string | null;
@@ -791,9 +742,10 @@ interface RunningSubagent {
 	// Resolved stage-2 timeout for this child (undefined → 30-min default;
 	// 0/negative/NaN → disabled). Per-spawn; no global setting.
 	silenceTimeoutMs: number;
-	// Kill source for the delivered marker: "kill-tool" (subagent_kill) or
-	// "progress-timeout" (stage-2 auto-kill). Null until killedExplicitly.
-	killedVia: "kill-tool" | "progress-timeout" | null;
+	// Kill source for the delivered marker: "kill-tool" (subagent_kill),
+	// "progress-timeout" (stage-2 auto-kill), or "turn-limit" (the
+	// MAX_TURNS_HARD stop). Null until killedExplicitly.
+	killedVia: "kill-tool" | "progress-timeout" | "turn-limit" | null;
 }
 
 const running = new Map<string, RunningSubagent>();
@@ -970,6 +922,12 @@ async function createWorktree(
 		// cleanups still run concurrently, unchanged.
 		const tCleanup = PI_ASYNC_DEBUG ? Date.now() : 0;
 		if (fs.existsSync(worktreePath)) {
+			// Unlock first: a leftover from a previous crashed run carries OUR
+			// session id (the branch/path suffix is derived from it), so the lock
+			// is ours to drop — and `worktree remove --force` refuses a locked
+			// tree (R3-2), so the remove must wait for the unlock. Best-effort: a
+			// never-locked leftover still cleans up.
+			await git(["worktree", "unlock", worktreePath], parentCwd);
 			await Promise.allSettled([
 				git(["worktree", "remove", "--force", worktreePath], parentCwd),
 				git(["branch", "-D", branchName], parentCwd),
@@ -994,6 +952,19 @@ async function createWorktree(
 		);
 		if (PI_ASYNC_DEBUG) debugLog(`createWorktree: worktree add: ${Date.now() - tAdd}ms`);
 		if (wtResult.exitCode !== 0) return null;
+
+		// R3-2 (tfd process-controls, owner 2026-10-19): lock the tree as soon as
+		// it exists. git refuses `worktree remove --force` on a locked tree, so a
+		// hand reap of a live child cannot destroy its uncommitted work; the
+		// harness's own cleanup and reap paths unlock first. Best-effort — a
+		// missing lock degrades the protection, never the dispatch.
+		const lockResult = await git(
+			["worktree", "lock", "--reason", `pi-subagent ${sessionId}`, worktreePath],
+			parentCwd,
+		);
+		if (lockResult.exitCode !== 0) {
+			debugLog(`createWorktree: worktree lock failed (${lockResult.stderr.trim() || lockResult.exitCode}) — tree ${worktreePath} is unprotected`);
+		}
 
 		// Best-effort overlay of the parent's uncommitted state; a failure
 		// degrades to the plain HEAD-only worktree, never fails the dispatch.
@@ -1279,9 +1250,30 @@ async function postDeliveryCleanup(
 
 	const t0 = PI_ASYNC_DEBUG ? Date.now() : 0;
 
+	let unlocked = false;
 	try {
-		// Remove the worktree directory (branch ref stays in the repo)
-		await git(["worktree", "remove", "--force", worktreePath], parentCwd);
+		// R3-2: unlock first — git refuses to force-remove a locked tree, and that
+		// refusal is the protection against reaping a live child's work. The
+		// completion is recorded by now (postDeliveryCleanup runs after
+		// deliverResult), so this is the proof the lock waited for. A tree that is
+		// not locked (spawned before this change, or already unlocked by the reap)
+		// is the one tolerated failure; any other unlock error means the lock may
+		// still be in force, so the directory is left alone rather than deleted.
+		const unlock = await git(["worktree", "unlock", worktreePath], parentCwd);
+		if (unlock.exitCode !== 0 && !/is not locked/i.test(unlock.stderr)) {
+			throw new Error(`git worktree unlock failed: ${unlock.stderr.trim() || `exit ${unlock.exitCode}`}`);
+		}
+		unlocked = true;
+
+		// Remove the worktree directory (branch ref stays in the repo). A failed
+		// removal is loud, not silent: the tree is unlocked by now, so swallowing
+		// the error would leave live work unprotected with no trace. The catch
+		// re-locks it (best-effort) and warns the parent. (Mirror:
+		// test-completion-filter.cjs throws on a failed remove too.)
+		const remove = await git(["worktree", "remove", "--force", worktreePath], parentCwd);
+		if (remove.exitCode !== 0) {
+			throw new Error(`git worktree remove failed: ${remove.stderr.trim() || `exit ${remove.exitCode}`}`);
+		}
 
 		if (finalCommit === parentHeadCommit) {
 			// Branch still at the parent commit — nothing new was committed (by the
@@ -1298,8 +1290,15 @@ async function postDeliveryCleanup(
 		if (PI_ASYNC_DEBUG) debugLog(`postDeliveryCleanup: ${Date.now() - t0}ms (hadChanges=${hadChanges})`);
 	} catch (e: any) {
 		if (PI_ASYNC_DEBUG) debugLog(`postDeliveryCleanup: FAILED after ${Date.now() - t0}ms: ${e.message || e}`);
-		// Best-effort: force-remove the worktree directory
-		try { fs.rmSync(worktreePath, { recursive: true, force: true }); } catch { /* */ }
+		// A failure after a successful unlock would leave an unprotected tree: put
+		// the lock back, best-effort, so live work stays guarded. Never rmtree the
+		// directory — that is exactly the deletion the lock exists to prevent, and
+		// the tree's cleanliness is unknown on this path. The warn below, plus the
+		// next session's reap, are the recovery.
+		if (unlocked) {
+			const relock = await git(["worktree", "lock", "--reason", `pi-subagent ${rs.sessionId} (cleanup failed)`, worktreePath], parentCwd);
+			debugLog(`postDeliveryCleanup: re-lock after failure: exit ${relock.exitCode}`);
+		}
 
 		// Surface the warning to the parent via steer
 		try {
@@ -1331,6 +1330,133 @@ function getFinalOutput(messages: any[]): string {
 		}
 	}
 	return "";
+}
+
+// ── Work-order records (decisions/work-order-records/001) ───────────────────
+// The spawner writes, into its own repo: the dispatch at spawn, then each
+// reviewer round and the completion when the implementer closes. The
+// implementer's worktree is never written — two writers would conflict at
+// merge. `scripts/wo_record.py` owns the format and the departure parsing.
+
+const WO_RECORD_SCRIPT = "scripts/wo_record.py";
+
+export interface WorkRecord {
+	cwd: string; // the spawner's repo root
+	woId: string; // WO-YYYY-NNN
+}
+
+function failureText(run: { error?: Error; stderr: string; status: number | null }): string {
+	return run.error?.message || run.stderr.trim() || `exit ${run.status}`;
+}
+
+function woRecordAppend(cwd: string, args: string[], body: string): string | null {
+	const run = spawnSync("python3", [path.join(cwd, WO_RECORD_SCRIPT), "append", ...args], {
+		cwd, input: body, encoding: "utf8",
+	});
+	return run.status === 0 && !run.error ? null : failureText(run);
+}
+
+/** A reviewer's task and final output, from its pi session file (JSONL, one entry per line).
+ *  A malformed line throws: a record must not quietly lose part of a session. */
+export function readSessionExchange(sessionFile: string): { task: string; output: string } | null {
+	const messages: any[] = [];
+	for (const line of fs.readFileSync(sessionFile, "utf-8").split("\n")) {
+		if (line.trim()) {
+			const entry = JSON.parse(line);
+			if (entry.type === "message") messages.push(entry.message);
+		}
+	}
+	const first = messages.find((m) => m?.role === "user");
+	if (!first) return null;
+	const task = typeof first.content === "string"
+		? first.content
+		: first.content.filter((p: any) => p.type === "text").map((p: any) => p.text).join("\n");
+	return { task, output: getFinalOutput(messages) };
+}
+
+/** Open a work-order record for a spawn by writing its dispatch. Returns the record to complete at
+ *  close, plus notes to surface. Never throws; a repo without wo_record.py gets neither record nor note. */
+export function openWorkRecord(
+	cwd: string,
+	workOrderPath: string,
+	implementerId: string,
+	task: string,
+): { record?: WorkRecord; notes: string[] } {
+	if (!fs.existsSync(path.join(cwd, WO_RECORD_SCRIPT))) return { notes: [] };
+	const fail = (why: string) => ({ notes: [`work-order record not written: ${why}`] });
+	try {
+		const woId = path.basename(workOrderPath).match(/^WO-\d{4}-\d{3}/)?.[0];
+		if (!woId) return fail(`${workOrderPath} has no WO-YYYY-NNN prefix`);
+		const blob = spawnSync("git", ["hash-object", "--", workOrderPath], { cwd, encoding: "utf8" });
+		if (blob.status !== 0 || blob.error) return fail(`git hash-object ${workOrderPath}: ${failureText(blob)}`);
+		const err = woRecordAppend(cwd, [
+			woId, "dispatch", "--wo_blob", blob.stdout.trim(), "--implementer", implementerId, "--work_order", workOrderPath,
+		], task);
+		return err ? fail(err) : { record: { cwd, woId }, notes: [] };
+	} catch (e) {
+		return fail(e instanceof Error ? e.message : String(e));
+	}
+}
+
+/** The reviewer sessions a record already holds, and how many reviews. Read through the tool, not
+ *  by parsing its text. A failure is returned as text: the caller then writes nothing. */
+function recordedReviews(record: WorkRecord): { sessions: Set<string>; count: number } | string {
+	const run = spawnSync("python3", [path.join(record.cwd, WO_RECORD_SCRIPT), "summary", record.woId, "--json"], {
+		cwd: record.cwd, encoding: "utf8",
+	});
+	if (run.status !== 0 || run.error) return failureText(run);
+	const reviews = (JSON.parse(run.stdout).entries as { kind: string; keys: Record<string, string> }[])
+		.filter((e) => e.kind === "review");
+	return { sessions: new Set(reviews.map((e) => e.keys.session)), count: reviews.length };
+}
+
+/** The final text of a recovered run, from its session file (its messages never reached this process). */
+function sessionFinalText(sessionFile: string | undefined): string {
+	return sessionFile ? (readSessionExchange(sessionFile)?.output ?? "") : "";
+}
+
+/** Write the reviews not yet in the record, then a completion, for a finished implementer. Reviews
+ *  already recorded (by session id) are skipped, so a resumed or recovered run appends only what is
+ *  new. `implementerKey` is its pi session id, the key its reviewers were registered under; `readFinal`
+ *  yields its final report and runs inside the guard. Returns notes for the writes that failed. */
+export function completeWorkRecord(record: WorkRecord, implementerKey: string, readFinal: () => string): string[] {
+	const { cwd, woId } = record;
+	try {
+		const recorded = recordedReviews(record);
+		if (typeof recorded === "string") return [`work-order record: ${woId} not read, nothing written: ${recorded}`];
+		const notes: string[] = [];
+		let round = recorded.count;
+		for (const entry of readPersistedSpawns(implementerKey).spawns) {
+			if (recorded.sessions.has(entry.childSessionId)) continue;
+			const where = `review ${entry.childSessionId}`;
+			try {
+				const sessionFile = readMetaJson(entry.childSessionId)?.sessionFile;
+				const exchange = sessionFile ? readSessionExchange(sessionFile) : null;
+				if (!exchange) {
+					notes.push(`work-order record: ${where} not written: no session file with a task`);
+					continue;
+				}
+				const err = woRecordAppend(cwd, [
+					woId, "review", "--seat", entry.childAgentName, "--round", String(round + 1), "--session", entry.childSessionId,
+				], JSON.stringify({ brief: exchange.task, output: exchange.output }));
+				if (err) notes.push(`work-order record: ${where} not written: ${err}`);
+				else {
+					round += 1;
+					recorded.sessions.add(entry.childSessionId);
+				}
+			} catch (e) {
+				notes.push(`work-order record: ${where} not written: ${e instanceof Error ? e.message : String(e)}`);
+			}
+		}
+		const finalText = readFinal();
+		const err = finalText.trim()
+			? woRecordAppend(cwd, [woId, "completion", "--implementer", implementerKey], finalText)
+			: "implementer has no final report";
+		if (err) notes.push(`work-order record: completion not written: ${err}`);
+		return notes;
+	} catch (e) {
+		return [`work-order record: completion not written: ${e instanceof Error ? e.message : String(e)}`];
+	}
 }
 
 function extractFilesFromArgs(toolName: string, args: Record<string, any>): { read?: string; write?: string } {
@@ -1378,6 +1504,7 @@ function formatProgress(rs: RunningSubagent): string {
 		p.filesRead.size > 0 ? `Files read: ${p.filesRead.size}` : null,
 		p.filesModified.size > 0 ? `Files modified: ${p.filesModified.size}` : null,
 		p.errors.length > 0 ? `Errors: ${p.errors.length}` : null,
+		rs.recordNotes?.length ? `Work-order record: ${rs.recordNotes.join("; ")}` : null,
 	]
 		.filter(Boolean)
 		.join(" | ");
@@ -1703,8 +1830,11 @@ function splitModelSpec(spec: string): { id: string; level?: string } {
  *   caller's model passes through unsubstituted (decisions 020/022).
  * - Resume keeps the recorded model verbatim (decision 022 site 2) —
  *   re-deriving it would silently switch a resumed child's model.
- * - Otherwise the agent frontmatter model wins, `FLEET_MODEL` when the seat
- *   pins none (decision 022).
+ * - Otherwise the agent frontmatter model wins, the fleet spec when the seat
+ *   pins none (decision 022). The spec is provider-qualified
+ *   (`opencode-go/deepseek-v4.1-flash`), never the bare id: a bare id resolves
+ *   against the session default provider and wanders onto unpinned routes
+ *   (owner ruling 2026-10-22).
  *
  * `undefined` means no `--model` flag at all (pi picks its own default).
  * Exported for tests (@for-testing-only): the precedence is the contract.
@@ -1716,14 +1846,14 @@ export function resolveChildModel(opts: {
 	inheritParentModel?: boolean;
 	isResume?: boolean;
 }): string | undefined {
-	if (opts.isResume) return opts.agentModel ?? FLEET_MODEL;
+	if (opts.isResume) return opts.agentModel ?? FLEET_MODEL_SPEC;
 	if (opts.agentName === INHERITING_AGENT) {
-		if (!opts.parentModel) return opts.agentModel ?? FLEET_MODEL;
+		if (!opts.parentModel) return opts.agentModel ?? FLEET_MODEL_SPEC;
 		const level = opts.agentModel ? splitModelSpec(opts.agentModel).level : undefined;
 		return level ? `${opts.parentModel}:${level}` : opts.parentModel;
 	}
 	if (opts.inheritParentModel) return opts.parentModel;
-	return opts.agentModel ?? FLEET_MODEL;
+	return opts.agentModel ?? FLEET_MODEL_SPEC;
 }
 
 // ── Spawn & manage ──────────────────────────────────────────────────────────
@@ -1864,6 +1994,7 @@ async function spawnSubagent(
 		parentCwd: parentCwdForCleanup,
 		parentTrackerKey: getParentTrackerKey(ctx),
 		reviewParentRequirements: gateSkipped ? undefined : agent.reviewParentRequirements,
+		ownerAsksRequired: reportDeclaresOwnerAsks(agent.systemPrompt),
 		usageStats: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, latestCacheHitRate: undefined },
 		carried: carriedSnapshot ?? null,
 		lastActivityMs: Date.now(),
@@ -2148,13 +2279,17 @@ async function spawnSubagent(
 					}
 				}
 
-				// Hard turn limit
+				// Hard turn limit — routes through the shared kill dispatch
+				// (dispatchKillSignals), NOT a bare proc.kill: the close handler is
+				// the single owner of delivery and reads killedExplicitly/killedVia
+				// to prepend the kill marker; a bare kill delivers the child's last
+				// message as a normal completion (and escapes the killed/stopped
+				// skips, e.g. the owner_asks gate).
 				if (rs.progress.turns >= MAX_TURNS_HARD) {
 					rs.progress.currentActivity = `hit turn limit (${MAX_TURNS_HARD}), stopping`;
 					rs.progress.errors.push(`Turn limit reached (${MAX_TURNS_HARD})`);
-					debugLog("turn-limit hit, killing proc");
-					proc.kill("SIGTERM");
-					setTimeout(() => { if (!proc.killed) proc.kill("SIGKILL"); }, HARD_KILL_DELAY_MS);
+					debugLog("turn-limit hit, dispatching kill");
+					dispatchKillSignals(rs, "turn-limit");
 					return;
 				}
 
@@ -2227,6 +2362,38 @@ async function spawnSubagent(
 					}
 					} // end else (piSessionId captured)
 				} // end if (required)
+
+					// R4 (tfd process-controls, owner 2026-10-19): a completion report
+					// from an agent whose schema declares `owner_asks` must carry the
+					// field — `none`, or registry row ids. Free text is refused: the
+					// reply steers the reporter to register the ask as a row and
+					// reissue. Same shape as the review-gate steer above, and for the
+					// same reason: the refusal happens while the reporter is alive, so
+					// no refused report is ever delivered, and the review-status gate
+					// (which only sees delivered reports) cannot count one as such.
+					if (rs.ownerAsksRequired && !rs.killedExplicitly && !rs.stoppedExplicitly) {
+						const reportText = (msg.content as any[])
+							.filter((c: any) => c.type === "text")
+							.map((c: any) => c.text)
+							.join("\n");
+						const verdict = validateOwnerAsks(reportText);
+						if (!verdict.ok) {
+							try {
+								rpcSend(rs.stdin, {
+									type: "prompt",
+									message: `[owner-asks] Report refused. ${verdict.error}`,
+									streamingBehavior: "steer",
+								});
+								logEntry(`\x1b[33m[owner-asks] report refused — ${verdict.error.split("\n")[0]}\x1b[0m`);
+								debugLog(`owner-asks: refused report child=${rs.sessionId}`);
+							} catch (e) {
+								debugLog(`owner-asks: rpcSend failed: ${e instanceof Error ? e.message : String(e)}`);
+							}
+							// Do NOT close stdin and do NOT set isDone: the report is not
+							// delivered until it conforms.
+							return;
+						}
+					}
 
 					rs.progress.currentActivity = "completed, closing session";
 					rs.isDone = true;
@@ -2356,7 +2523,12 @@ async function spawnSubagent(
 		// DELIVER: the result reaches the parent now.
 		// No double delivery: resolveOnStop and deliverResult are mutually
 		// exclusive — see deliverCloseResult (the single delivery owner).
-		const deliveryPath = deliverCloseResult(pi, rs, code ?? 0, commitNote);
+		// Work-order record: the completion and each reviewer round (decisions/work-order-records/001).
+		const recordNotes = rs.workRecord
+			? completeWorkRecord(rs.workRecord, rs.piSessionId ?? sessionId, () => getFinalOutput(rs.messages))
+			: [];
+		rs.recordNotes = [...(rs.recordNotes ?? []), ...recordNotes];
+		const deliveryPath = deliverCloseResult(pi, rs, code ?? 0, commitNote + recordNotes.map((n) => `\n${n}`).join(""));
 		if (PI_ASYNC_DEBUG) debugLog(`deliverResult (${deliveryPath}): ${Date.now() - tDeliver}ms`);
 
 		// POST-DELIVERY: worktree removal and branch cleanup. Fire-and-forget —
@@ -2820,7 +2992,7 @@ function fireSilenceKill(rs: RunningSubagent): void {
  *  (recovered/pre-reload session) — callers must distinguish that from a
  *  raced exit. Exported as an @internal test hook so the kill paths can be
  *  exercised with stubbed procs. */
-export function dispatchKillSignals(rs: RunningSubagent, via: "kill-tool" | "progress-timeout"): { alreadyDead: boolean; noProcess?: boolean } {
+export function dispatchKillSignals(rs: RunningSubagent, via: "kill-tool" | "progress-timeout" | "turn-limit"): { alreadyDead: boolean; noProcess?: boolean } {
 	// Order matters: set the flags BEFORE any proc access or signal so the
 	// close handler observes them on entry — including the null-proc
 	// (recovered/pre-reload) path below.
@@ -2839,7 +3011,7 @@ export function dispatchKillSignals(rs: RunningSubagent, via: "kill-tool" | "pro
 	if (rs.staleTimer) { clearTimeout(rs.staleTimer); rs.staleTimer = null; }
 	if (rs.silenceTimer) { clearTimeout(rs.silenceTimer); rs.silenceTimer = null; }
 
-	const viaLabel = via === "progress-timeout" ? "progress-timeout" : "subagent_kill";
+	const viaLabel = via === "kill-tool" ? "subagent_kill" : via;
 
 	// Recovered/pre-reload sessions are reconstructed from disk with a null
 	// proc (session_start re-attach — `proc: null` in that path); there is
@@ -2882,12 +3054,15 @@ export function dispatchKillSignals(rs: RunningSubagent, via: "kill-tool" | "pro
 }
 
 /** Marker prefix for a delivered kill result. Mirrors the `subagent_kill`
- *  marker; the stage-2 variant is greppable as `[Killed via progress-timeout]`. */
+ *  marker; the stage-2 variant is greppable as `[Killed via progress-timeout]`
+ *  and the turn-limit variant as `[Killed via turn-limit]`. */
 function killedMarker(rs: RunningSubagent): string | null {
 	if (!rs.killedExplicitly) return null;
-	return rs.killedVia === "progress-timeout"
-		? "[Killed via progress-timeout — process terminated, work in this subagent is lost]"
-		: "[Killed via subagent_kill — process terminated, work in this subagent is lost]";
+	if (rs.killedVia === "progress-timeout")
+		return "[Killed via progress-timeout — process terminated, work in this subagent is lost]";
+	if (rs.killedVia === "turn-limit")
+		return "[Killed via turn-limit — process terminated, work in this subagent is lost]";
+	return "[Killed via subagent_kill — process terminated, work in this subagent is lost]";
 }
 
 /** Close-handler delivery decision — the single owner of result delivery
@@ -3101,12 +3276,14 @@ export function recoverOrphanedSubagents(
 				isolationBranch: meta.isolationBranch || null,
 				parentHeadCommit: meta.parentHeadCommit || null,
 				parentCwd: meta.parentCwd || ctx.cwd,
+				workRecord: meta.workRecord,
 				// Recovered (orphan-reattached) subagents don't carry the
 				// parent's tracker key from the metadata file. Use a stable
 				// pid fallback so re-attached sessions don't pollute the
 				// live tracker's view. If we had a `parentSessionId` field
 				// in the meta file, we'd use it here instead.
 				parentTrackerKey: getParentTrackerKey(ctx),
+				ownerAsksRequired: reportDeclaresOwnerAsks(meta.systemPrompt),
 				reviewParentRequirements: undefined,
 				usageStats: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, latestCacheHitRate: undefined },
 				carried: null,
@@ -3160,7 +3337,12 @@ export function recoverOrphanedSubagents(
 						finalOutput = log.split("── ").pop()?.trim() || finalOutput;
 					}
 				} catch {}
-				deliverResult(pi, rs, 0, `\n[Isolation] Recovered from previous session.`);
+				// The recovered child's messages never reached this process; its session file has them.
+				const recordNotes = rs.workRecord
+					? completeWorkRecord(rs.workRecord, meta.piSessionId ?? sid, () => sessionFinalText(meta.sessionFile))
+					: [];
+				rs.recordNotes = recordNotes;
+				deliverResult(pi, rs, 0, `\n[Isolation] Recovered from previous session.${recordNotes.map((n) => `\n${n}`).join("")}`);
 				running.delete(sid);
 				updateFooter();
 			});
@@ -3170,6 +3352,99 @@ export function recoverOrphanedSubagents(
 			updateFooter();
 		}
 	} catch { /* best-effort */ }
+}
+
+/** Outcome of one finished-worktree reap decision. */
+export interface ReapResult {
+	sid: string;
+	outcome: "removed" | "kept-uncommitted" | "kept-unlock-failed" | "kept-remove-failed" | "kept-git-error";
+	worktreePath: string;
+	detail?: string;
+}
+
+/**
+ * R3-2 reap: on session start, remove subagent worktrees whose child is
+ * provably finished and whose bytes are preserved.
+ *
+ * Two gates, both required:
+ *   - 027's adoption gate — a live foreign owner's tree is never touched, and a
+ *     legacy meta is unattributable;
+ *   - child-side terminal evidence — the log's last line is the
+ *     `── Completed|Exited|Stopped|Killed (…) ──` footer, the same evidence the
+ *     status vocabulary reads. Owner death alone is NOT enough: the child is a
+ *     separate process and a dead owner can outlive it.
+ *
+ * Then: a clean tree (`git status --porcelain -uall` empty, so the work lives
+ * on the branch) is unlocked and removed with a plain `worktree remove` — no
+ * `--force`, so even a race cannot delete uncommitted work. A dirty tree is
+ * left in place, marked in the meta (`worktreeKept`) so the status answer
+ * offers `subagent_resume` for it, and the reap moves on. Never throws.
+ */
+export async function reapFinishedWorktrees(
+	pi: ExtensionAPI,
+	ctx: any,
+	deps: RecoveryScanDeps = {},
+): Promise<ReapResult[]> {
+	const results: ReapResult[] = [];
+	try {
+		const dir = deps.dir ?? recoveryScanDirOverride ?? "/tmp";
+		for (const { sid, meta } of listSubagentMetas(dir)) {
+			if (running.has(sid)) continue; // this process is still tracking it
+			if (decideRecoveryAdoption(meta, { selfPid: deps.selfPid, probe: deps.probe }) !== "adopt") continue;
+			const worktreePath = typeof meta.worktreePath === "string" ? meta.worktreePath : null;
+			if (!worktreePath) continue;
+
+			const facts = gatherSubagentDiskFacts(sid, { meta, dir, probe: deps.probe });
+			if (!hasTerminalFooter(facts.logLastLine)) continue; // child not provably finished
+
+			if (!fs.existsSync(worktreePath)) {
+				results.push({ sid, outcome: "removed", worktreePath, detail: "directory already gone" });
+				continue;
+			}
+
+			// Run git inside the worktree: its parent cwd may itself be gone.
+			const status = await git(["status", "--porcelain", "-uall"], worktreePath);
+			if (status.exitCode !== 0) {
+				debugLog(`reap: ${sid} git status failed: ${status.stderr.trim()}`);
+				results.push({ sid, outcome: "kept-git-error", worktreePath, detail: status.stderr.trim() });
+				continue;
+			}
+			if (status.stdout.trim().length > 0) {
+				debugLog(`reap: ${sid} kept — uncommitted work in ${worktreePath}`);
+				updateMetaAt(path.join(dir, `pi-subagent-${sid}.meta.json`), {
+					worktreeKept: { reason: "uncommitted work", at: new Date().toISOString() },
+				});
+				results.push({ sid, outcome: "kept-uncommitted", worktreePath });
+				continue;
+			}
+
+			const unlock = await git(["worktree", "unlock", worktreePath], worktreePath);
+			if (unlock.exitCode !== 0 && !/is not locked/i.test(unlock.stderr)) {
+				debugLog(`reap: ${sid} unlock failed: ${unlock.stderr.trim()}`);
+				results.push({ sid, outcome: "kept-unlock-failed", worktreePath, detail: unlock.stderr.trim() });
+				continue;
+			}
+			const remove = await git(["worktree", "remove", worktreePath], worktreePath);
+			if (remove.exitCode !== 0) {
+				// The tree is clean by the check above and the unlock already
+				// succeeded, so a removal failure leaves it unprotected: put the
+				// lock back, best-effort, exactly as postDeliveryCleanup does. Never
+				// `--force`, never rmtree — the next reap retries.
+				const relock = await git(
+					["worktree", "lock", "--reason", `pi-subagent ${sid} (reap failed)`, worktreePath],
+					worktreePath,
+				);
+				debugLog(`reap: ${sid} remove failed: ${remove.stderr.trim()} (re-lock exit ${relock.exitCode})`);
+				results.push({ sid, outcome: "kept-remove-failed", worktreePath, detail: remove.stderr.trim() });
+				continue;
+			}
+			debugLog(`reap: removed finished worktree ${worktreePath} (${sid})`);
+			results.push({ sid, outcome: "removed", worktreePath });
+		}
+	} catch (e) {
+		debugLog(`reap: aborted: ${e instanceof Error ? e.message : String(e)}`);
+	}
+	return results;
 }
 
 // ── Extension entry point ──────────────────────────────────────────────────
@@ -3198,6 +3473,11 @@ export default function (pi: ExtensionAPI) {
 		// recorded identity, so a live foreign session's children are left
 		// alone. See `recoverOrphanedSubagents`.
 		try { recoverOrphanedSubagents(pi, ctx); } catch { /* best-effort */ }
+		// R3-2 reap: finished children's worktrees, two gates (027 + completion
+		// footer). Fire-and-forget — a failure must never block session start.
+		reapFinishedWorktrees(pi, ctx).catch((e) => {
+			debugLog(`reap: unhandled: ${e instanceof Error ? e.message : String(e)}`);
+		});
 	});
 
 	pi.on("session_shutdown", () => {
@@ -3601,6 +3881,14 @@ export default function (pi: ExtensionAPI) {
 
 			running.set(sessionId, rs);
 
+			// Work-order record: the dispatch is written by this spawner, into its own repo.
+			// A failure is reported with the result; it never fails the spawn.
+			const dispatch = params.workOrderPath
+				? openWorkRecord(cwd, params.workOrderPath, sessionId, params.task)
+				: { notes: [] };
+			rs.workRecord = dispatch.record;
+			rs.recordNotes = dispatch.notes;
+
 		// Write metadata for recovery on session reload. Includes the full
 		// agent config so subagent_resume can reproduce the original
 		// configuration faithfully (storing the resolved model and system
@@ -3627,6 +3915,7 @@ export default function (pi: ExtensionAPI) {
 			systemPrompt: agent.systemPrompt,
 			allowedSubagents: agent.allowedSubagents ?? [],
 			excludeTools: agent.excludeTools ?? [],
+			workRecord: dispatch.record,
 		}));
 
 			// Reviewer-spawn tracker: if the spawned agent is a declared reviewer
@@ -3660,6 +3949,7 @@ export default function (pi: ExtensionAPI) {
 						text: [
 							`Subagent started: ${agent.name} (session: ${sessionId})${isolationStatus}`,
 							`Task: ${params.task.slice(0, 200)}${params.task.length > 200 ? "..." : ""}`,
+							...dispatch.notes,
 							"",
 							"The session id is the subagent's real pi session id — search it in /resume",
 							"or join it from a terminal with `pi --session <id>`.",
@@ -3700,7 +3990,7 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			return {
-				content: [{ type: "text", text: formatProgress(rs) }],
+				content: [{ type: "text", text: `State: running — attached to this session's tracker.\n${formatProgress(rs)}` }],
 			};
 		},
 	});
@@ -3895,6 +4185,8 @@ export default function (pi: ExtensionAPI) {
 				cwd,
 				resolvedMeta.sessionFile, // resumeSessionFile
 			);
+			// The resumed run completes the same work-order record (decisions/work-order-records/001).
+			rs.workRecord = resolvedMeta.workRecord;
 
 			running.set(sid, rs);
 			updateFooter();

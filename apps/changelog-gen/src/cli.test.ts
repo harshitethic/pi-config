@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -55,11 +55,17 @@ function createTempGitRepo(): string {
   return dir;
 }
 
-function runCli(args: string[], cwd?: string) {
-  return spawnSync('npx', ['tsx', cliPath, ...args], {
+// The CLI runs under `bun` directly: spawning `npx tsx` made every CLI row a
+// network/npm-cache lottery (a stale or unreachable npx registry batch produced
+// ENOENT/exit-221 flakes that looked like pre-existing failures). `timeout`
+// makes a hang fail loudly (status null + SIGTERM) instead of an arbitrary
+// exit code.
+function runCli(args: string[], cwd?: string, env?: NodeJS.ProcessEnv) {
+  return spawnSync('bun', [cliPath, ...args], {
     cwd: cwd ?? process.cwd(),
     encoding: 'utf-8',
-    env: { ...process.env, PATH: process.env.PATH },
+    timeout: 60_000,
+    env: env ?? { ...process.env },
   });
 }
 
@@ -196,16 +202,32 @@ describe('CLI integration', () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('changelog-gen:');
   }, 30_000);
+
+  it('runCli does not depend on npx: a broken npx on PATH must not flip CLI rows', () => {
+    // Regression pin for the spawn flake (gh #10): before the fix every row
+    // spawned `npx tsx`, so a stale/broken npx batch (exit 221, ENOENT on
+    // spawn) turned the whole CLI describe red at once. A fake npx that
+    // exits 221 is front-of-PATH here; the direct `bun` spawn must ignore it.
+    const dir = mkdtempSync(join(tmpdir(), 'fake-npx-'));
+    const fake = join(dir, 'npx');
+    writeFileSync(fake, '#!/bin/sh\nexit 221\n');
+    chmodSync(fake, 0o755);
+    try {
+      const result = runCli([createTempGitRepo(), '--format', 'md'], undefined, {
+        ...process.env,
+        PATH: dir + ':' + process.env.PATH,
+      });
+      expect(result.status).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
 });
 
 describe('CLI default repo', () => {
   it('default repo . exits 0 with changelog header', () => {
     // Run from the apps/changelog-gen directory (which is a git repo)
-    const result = spawnSync('npx', ['tsx', cliPath], {
-      cwd: join(__dirname, '..'),
-      encoding: 'utf-8',
-      env: { ...process.env, PATH: process.env.PATH },
-    });
+    const result = runCli([], join(__dirname, '..'));
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('# Changelog');
   }, 30_000);

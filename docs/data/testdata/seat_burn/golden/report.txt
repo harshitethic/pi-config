@@ -1,0 +1,135 @@
+SEAT BURN — pi session-log token accounting by seat, model and OpenCode Go plan
+window: 2026-05-01..2026-05-03 UTC (3 days, 20 assistant messages)
+sessions: <SESSIONS>
+spawn records: <META> (pi-subagent-<session-id>.meta.json)
+NOTE: some token classes have no published price; those tokens are reported and excluded from $ burn (see PRICES + data quality).
+
+== per-day by seat ==
+date       seat                                               raw tokens      cache rd   cache wr      in+out    $ burn
+2026-05-01 ambiguous:review-code|review-plan|review-tests          6,100         5,000          0       1,100  0.000350
+2026-05-01 implement                                                 110             0          0         110  0.000042
+2026-05-01 main-session                                           53,031        43,060      1,000       8,971    0.0021
+2026-05-01 math-algo-oracle                                       11,100        10,000          0       1,100    0.0011
+2026-05-01 orchestrator                                            6,100         5,000          0       1,100  0.000450
+2026-05-02 main-session                                           11,100        10,000          0       1,100  0.000240
+2026-05-03 main-session                                           11,100        10,000          0       1,100  0.000240
+
+== per-day by model ==
+date       model                         route             raw tokens      cache rd      in+out    $ burn
+2026-05-01 claude-x-unknown              anthropic              1,100             0       1,100         0
+2026-05-01 deepseek-v4-pro               opencode-go           11,100        10,000       1,100    0.0011
+2026-05-01 deepseek-v4.1-flash           opencode-go           48,161        41,000       6,161    0.0018
+2026-05-01 deepseek-v4.1-flash           openrouter             1,110            60       1,050  0.000180
+2026-05-01 deepseek-v4.1-flash-1017      openrouter             6,100         5,000       1,100  0.000450
+2026-05-01 glm-5.3-flash                 opencode-go            8,650         7,000       1,650  0.000510
+2026-05-01 glm-5.3-flash                 zai                      220             0         220  0.000040
+2026-05-02 deepseek-v4.1-flash           opencode-go           11,100        10,000       1,100  0.000240
+2026-05-03 deepseek-v4.1-flash           opencode-go           11,100        10,000       1,100  0.000240
+
+== window summary: seats ==
+seat                                               raw tokens   tok %    $ burn     $ %      pi $   msgs  attribution
+main-session                                           75,231   76.3%    0.0026   57.7%  0.000820     16  filename
+math-algo-oracle                                       11,100   11.2%    0.0011   23.8%         0      1  signature
+ambiguous:review-code|review-plan|review-tests          6,100    6.2%  0.000350    7.7%         0      1  ambiguous:review-code|review-plan|review-tests
+orchestrator                                            6,100    6.2%  0.000450    9.9%         0      1  signature
+implement                                                 110    0.1%  0.000042    0.9%  0.000042      1  meta
+TOTAL                                                  98,641  100.0%    0.0045  100.0%  0.000862     20
+
+== window summary: models ==
+model                         route             raw tokens  cache %    $ burn      pi $  price note
+deepseek-v4.1-flash           opencode-go           70,361    88.1%    0.0023  0.000762  peak ×2 applied unpriced: cache_write
+deepseek-v4-pro               opencode-go           11,100    90.1%    0.0011         0  unpriced: cache_write
+glm-5.3-flash                 opencode-go            8,650    80.9%  0.000510  0.000100  unpriced: cache_write
+deepseek-v4.1-flash-1017      openrouter             6,100    82.0%  0.000450         0  peak ×2 applied unpriced: cache_write
+deepseek-v4.1-flash           openrouter             1,110     5.4%  0.000180         0  unpriced: cache_write
+claude-x-unknown              anthropic              1,100     0.0%         0         0  price unknown
+glm-5.3-flash                 zai                      220     0.0%  0.000040         0  unpriced: cache_write
+
+== OpenCode Go plan: per-model solo capacity (illustrative, NOT separate budgets) ==
+one shared monthly allowance; the console meters Σ(real $ on model m ÷ solo
+capacity_m) ≤ 1.0 — the per-model figure is what one model alone could consume
+(opencode console quotaCost, github.com/anomalyco/opencode#54875)
+model                          solo cap $    raw tokens    $ burn    $/day month proj solo use  meter part
+deepseek-v4-pro                        60        11,100    0.0011 0.000359     0.0108     0.0%  0.00001797
+deepseek-v4.1-flash                   160        70,361    0.0023 0.000760     0.0228     0.0%  0.00001425
+glm-5.3                               120             0         0        0          0     0.0%  0.00000000
+glm-5.3-flash                         180         8,650  0.000510 0.000170     0.0051     0.0%  0.00000283
+mimo-v2.6-pro                          60             0         0        0          0     0.0%  0.00000000
+PLAN-WIDE METER  Σ(real $ on model m ÷ solo capacity_m) over the window: 0.00003505
+  0.00001168/day → month-projected 0.00035050 vs 1.0 (0.0% of the shared allowance) → fits
+  self-check: /zen/go/v1/usage monthly percent (plan-wide, no per-model
+  breakdown) — footer quota segment, decisions/external-tools/006; this
+  tool performs no network I/O. The meter is biased where a price row
+  leaves a class unpriced (understates) or carries a placeholder price
+  (unknown direction — see the solo-capacity notes above).
+  projection = window $ burn / 3 days × 30
+
+== headline ==
+session+orchestrator seats = 82.5% of raw tokens, 67.6% of $ burn
+  (81,331 raw tokens, $0.0031 list-price burn, $0.000820 as charged by pi [95.1%])
+  month-projected at observed pace: $0.0307 vs mimo-v2.6-pro's solo capacity ($60) → fits (0.1% of it)
+  plan-wide meter for these seats: 0.000149 month-projected (0.0% of the allowance, 42.5% of the whole plan meter)
+
+== data quality ==
+files scanned: 10 (+1 *.pre-* backups skipped), unreadable: 0, unparseable lines: 0
+entry types seen in the scanned corpus: compaction=1, custom=1, custom_message=1, message=27, model_change=13, session=10, session_info=1, thinking_level_change=7
+duplicate entry ids dropped (replay/branching, in window): 3
+assistant messages without usage (in window): 2; without totalTokens: 1; totalTokens ≠ Σclasses: 0; bad timestamps: 0; peak-window timestamps unparseable (priced off-peak): 2
+messages without an envelope provider: 1 (model_change: 1, model-id prefix: 0, unknown: 0)
+spawn records joined: 1; without agentName: 0; unreadable: 0
+attribution: ambiguous:review-code|review-plan|review-tests=1, filename=16, meta=1, signature=2
+unattributed: 6,100 raw tokens (6.2%), $0.000350 burn (7.7%) — includes ambiguous groups
+  ambiguous group ambiguous:review-code|review-plan|review-tests  [glm-5.3-flash:high]  1 messages
+unpriced token classes (excluded from $ burn):
+  claude-x-unknown input: 1,000 tokens — price unknown
+  claude-x-unknown output: 100 tokens — price unknown
+  deepseek-v4.1-flash cache_write: 1,000 tokens — price unknown
+pi-recorded cost (all providers, as charged): $0.000862 vs list-price burn $0.0045
+
+== model-id spellings (whole scanned corpus; canonical ← recorded) ==
+  claude-x-unknown ← anthropic/claude-x-unknown  [anthropic]
+  deepseek-v4-pro ← deepseek-v4-pro  [opencode-go]
+  deepseek-v4.1-flash ← deepseek-v4.1-flash, deepseek/deepseek-v4.1-flash  [opencode-go, openrouter]
+  deepseek-v4.1-flash-1017 ← deepseek/deepseek-v4.1-flash-1017  [openrouter]
+  glm-5.3-flash ← glm-5.3-flash  [opencode-go, zai]
+
+== seat signature table (derived from agents/*.md + settings.json) ==
+  implement          deepseek-v4.1-flash    :high    exact   agents/implement.md frontmatter model
+  math-algo-oracle   deepseek-v4-pro        :max     exact   agents/math-algo-oracle.md frontmatter model
+  orchestrator       <caller's model>       :max     inherit agents/orchestrator.md frontmatter model + decisions/subagents/031 (caller's model, seat's level)
+  review-code        glm-5.3-flash          :high    exact   agents/review-code.md frontmatter model
+  review-plan        glm-5.3-flash          :high    exact   agents/review-plan.md frontmatter model
+  review-tests       glm-5.3-flash          :high    exact   agents/review-tests.md frontmatter model
+  scout-code         deepseek-v4.1-flash    :low     exact   agents/scout-code.md frontmatter model
+  scout-web          deepseek-v4.1-flash    :low     exact   agents/scout-web.md frontmatter model
+  note: agents/bug-triage.md: no frontmatter name — not a spawnable agent (main-session/peer seat only), excluded from signature inference
+
+== price table ($/M, list price per class) + Go Plus solo capacity ($/month) ==
+model                            in    out cache rd cache wr    peak  solo cap $
+deepseek-v4-flash              0.14   0.28    0.028  unknown unknown           —
+deepseek-v4-flash-0731         0.14   0.28   0.0028  unknown unknown           —
+deepseek-v4-pro                0.66   1.98    0.022  unknown      ×2          60
+deepseek-v4.1-flash            0.15    0.6    0.003  unknown      ×2         160
+deepseek-v4.1-flash-1017       0.15    0.6    0.003  unknown      ×2           —
+glm-5.3                         1.4    4.4     0.26  unknown unknown         120
+glm-5.3-flash                  0.15    0.5     0.03  unknown unknown         180
+mimo-v2.5-pro                 0.435   0.87 0.003625  unknown unknown           —
+mimo-v2.6-flash                0.14   0.28   0.0028  unknown unknown           —
+mimo-v2.6-pro                 0.435   0.87 0.003625  unknown unknown          60
+minimax-m3                      0.3    1.2     0.06  unknown unknown           —
+  deepseek-v4-flash: decisions/subagents/010 (pi.dev catalog row for the 0910 flash id)
+  deepseek-v4-flash-0731: decisions/subagents/010 (pi.dev catalog row: 0731 flash, 10x cheaper cache read)
+  deepseek-v4-pro: opencode.ai/v2/docs/console/go/ table (fetched 2026-10-18): 0.022 off-peak / 0.044 peak (= the ×2 multiplier here)
+    solo capacity $60/mo: WO-2026-053 amendment 2026-10-18 (Go Plus solo capacity; supersedes 037's $15 Go-era figure)
+  deepseek-v4.1-flash: decisions/subagents/036 (OpenCode Go list = DeepSeek first-party list: in/out/cache-read); peak doubling per 036
+    solo capacity $160/mo: decisions/subagents/036 (Go Plus solo capacity)
+  deepseek-v4.1-flash-1017: decisions/subagents/035 (1017 checkpoint: pricing unchanged from the 0910 id, weekday peak windows unchanged)
+  glm-5.3: opencode.ai/v2/docs/console/go/ table (fetched 2026-10-18); in/out per 036
+    solo capacity $120/mo: qcode.cc Go guide (updated 2026-10-15) — third-party single-source; the 038 promotion path's ceiling
+  glm-5.3-flash: opencode.ai/v2/docs/console/go/ table (fetched 2026-10-18); in/out per 036 — cache-read $0.03 confirmed by exact match with pi-recorded $ on the 2026-10-17 window
+    solo capacity $180/mo: WO-2026-053 amendment 2026-10-18 (Go Plus solo capacity; supersedes 037's $60 Go-era figure)
+  mimo-v2.5-pro: opencode.ai/v2/docs/console/go/ table (fetched 2026-10-18); matches the OpenRouter row in 010
+  mimo-v2.6-flash: decisions/subagents/023 (Xiaomi first-party pin, in/out/cache-read)
+  mimo-v2.6-pro: opencode.ai/v2/docs/console/go/ table (fetched 2026-10-18) — first-party Xiaomi prices; supersedes the 0.036 OpenRouter cache placeholder (10x too high); matches pi-recorded $
+    solo capacity $60/mo: WO-2026-053 amendment 2026-10-18 + decisions/subagents/036 (the watched allowance consumer)
+  minimax-m3: decisions/subagents/010 (OpenRouter live /models row)

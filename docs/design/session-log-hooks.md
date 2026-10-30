@@ -8,21 +8,23 @@ feature: session-log
 
 # Session-log hooks (Claude Code and pi)
 
-Keeps a working session's log (`tfd`'s `docs/sessions/`) current without the owner asking. A repo that carries `scripts/session_log.py` gets one line of context at session start, its log's state after a compaction, and a nudge when it is about to move on with decision/registry changes the log does not record. Everywhere else the hooks are silent.
+Keeps a working session's log (`tfd`'s `docs/sessions/`) current without the owner asking. A repo that carries `scripts/session_log.py` gets its log's state at session start and again after a compaction, and a nudge when the log needs reconciling or it is about to move on with decision/registry changes the log does not record. Everywhere else the hooks are silent.
+
+The log is also the session's work list: `extensions/todo.ts` is retired (`decisions/todo/001`). Agents append events with `python3 scripts/session_log.py append --session <id> '<event line>'` — aligned, `ref: HEAD` becomes the commit's sha, and a malformed line or a new `check` error writes nothing (tfd `decisions/session-logs/005`) — and read state back with `summary --session <id> [--current]`; start and compact inject that digest.
 
 Code: `extensions/session-log/` — `lib.ts` (shared plumbing), `index.ts` (pi extension), `external.ts` (Claude Code hook CLI, not a pi extension). Decision: `decisions/external-tools/004-session-log-hooks.md`. Script contract: `tfd/docs/sessions/README.md`.
 
 ## Contract
 
-`python3 scripts/session_log.py hook <start|compact|stop> --session <id> --harness <pi|claude-code> --cwd <session cwd>` prints the text to inject (possibly empty) and always exits 0. The harness passes its own session id, its name, and the session's working directory — the start text puts all three into the log frontmatter it asks the agent to write. The script matches the id against each log's `agent-session:` frontmatter.
+`python3 scripts/session_log.py hook <start|compact|stop> --session <id> --harness <pi|claude-code> --cwd <session cwd>` prints the text to inject (empty only when `stop` finds nothing) and always exits 0. The harness passes its own session id, its name, and the session's working directory — the start text names all three when it asks the agent to open a log. The script finds a session's log by writer: the latest `adopt` event, else the `agent-session:` frontmatter (tfd `decisions/session-logs/003`).
 
 | moment | tfd event | text |
 |---|---|---|
-| session start | `start` | which log is this session's, or how to open one; other active logs |
-| after compaction | `compact` | the log's current state to re-read |
-| moving on with unrecorded changes | `stop` | changed decision/registry files no active log points at via `ref:` |
+| session start | `start` | the session's log and how to append to it (the `append` command), with its `summary` digest (log errors included), or how to open or `adopt` one; then a count of other active logs and of logs with no clear current version across clones, pointing at `project --text` |
+| after compaction | `compact` | the same text, prefixed with the script's "Context was compacted. Re-read your session log before continuing." |
+| moving on with unrecorded changes | `stop` | the log's append-only and other-clone errors first, then changed decision/registry files no active log points at via `ref:` (tfd `decisions/session-logs/004`) |
 
-Only repos carrying `scripts/session_log.py` participate: the helpers walk up from the session cwd, and an absent script, a missing interpreter, a timeout or a non-zero exit all read as "nothing to say". The script's stdout is injected verbatim (trailing whitespace trimmed) — no wrapper text, so the context cost is exactly the script's cost. A hook runs the script from the repo root but passes `--cwd` as the session's own directory; the `stop` check matches changed decision/registry files against the `ref:` pointers in every active log, so edits another session has already recorded stay quiet.
+Only repos carrying `scripts/session_log.py` participate: the helpers walk up from the session cwd, and an absent script, a missing interpreter, a timeout or a non-zero exit all read as "nothing to say". The start/compact text ends by pointing at `project --text`, the project view rendered for an agent: every session across clones with goal/area states and copy warnings, open registry rows, recent decisions. The script's stdout is injected verbatim (trailing whitespace trimmed) — no wrapper text, so the context cost is exactly the script's cost. That cost is bounded by the script: the newest ten live areas keep their text clipped to 120 chars, every other area is named by id and state, and log errors are never clipped (tfd `decisions/session-logs/014`). An unbounded digest reached 500 kB (~130k tokens) per injection on a long-lived log, paid at every start and again after every compaction; the log file and `view` page still hold the full text. A hook runs the script from the repo root but passes `--cwd` as the session's own directory; the `stop` check matches changed decision/registry files against the `ref:` pointers in every active log, so edits another session has already recorded stay quiet.
 
 ## pi (`index.ts`)
 

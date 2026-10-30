@@ -1,9 +1,19 @@
+// LIVE-NETWORK: this file makes real billed LLM calls on every full `bun test` run.
+// Provider/model: openrouter/deepseek/deepseek-v4-flash (OpenRouter canonical `-20260423`),
+// authorized from the live `~/.pi/agent/auth.json`.
+// Invisible to session-log attribution: sessions run via `SessionManager.inMemory`, so no
+// transcript is persisted; in-test compaction rides the same model (~20–30 requests per run).
+// See docs/investigations/or-workspace-attribution-2026-10.md.
+
 /**
  * E2E tests for the checkpoint extension.
  *
- * Drives real pi agent sessions via the SDK — loads the actual checkpoint.ts
- * extension, sends prompts that cause the agent to read files and call the
- * checkpoint tool, then verifies compaction, file injection, and search.
+ * Two layers:
+ *   - live sessions via the SDK (real model): compaction, pairing, and one
+ *     end-to-end flow where the answer can only come from the injection;
+ *   - a deterministic handler-table harness driving the real extension's
+ *     handlers with real files: read tracking and file injection, where model
+ *     compliance has no say.
  *
  * Run:
  *   bash tests/setup.sh        # one-time: link global pi packages
@@ -11,9 +21,11 @@
  */
 
 import { describe, expect, it, beforeAll, afterAll } from "bun:test";
-import { mkdtemp, writeFile, rm, readdir, mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { spawnSync } from "node:child_process";
+import { mkdtemp, writeFile, readFile, rm, readdir } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { Value } from "typebox/value";
 import {
 	createAgentSession,
 	DefaultResourceLoader,
@@ -23,7 +35,9 @@ import {
 	SettingsManager,
 	type AgentSession,
 } from "@earendil-works/pi-coding-agent";
-import checkpointExtension from "../extensions/checkpoint";
+import checkpointExtension, { _testSetInflightScanDir } from "../extensions/checkpoint";
+import { takePendingGo } from "../extensions/go.ts";
+import { childEnv, scrubSubagentEnv } from "./helpers/subagent-env.ts";
 
 const CHECKPOINT_EXTENSION = join(
 	import.meta.dir,
@@ -40,7 +54,20 @@ const NEEDLES = [
 	"SILVER-PANGOLIN-9470",
 ];
 
-const TOOLS = ["read", "bash", "checkpoint", "checkpoint_fork", "checkpoint_search"];
+const TOOLS = ["read", "bash", "checkpoint", "checkpoint_fork"];
+
+// The live rows run in a subagent session too, where the harness injects
+// PI_SUBAGENT_*; the file controls that env instead of inheriting it, and every
+// spawn passes childEnv() (tests/helpers/subagent-env.ts).
+let restoreSubagentEnv: () => void = () => {};
+
+beforeAll(() => {
+	restoreSubagentEnv = scrubSubagentEnv();
+});
+
+afterAll(() => {
+	restoreSubagentEnv();
+});
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -293,8 +320,15 @@ describe("checkpoint: basic flow", () => {
 
 	it("triggers checkpoint and compaction succeeds with file injection", async () => {
 		const { session, sessionManager, tmpCwd } = env;
+		// `continue: true` is stated explicitly: the default already makes it true,
+		// but a model that volunteers `continue: false` silently suppresses the
+		// follow-up this row (and the next) depends on — the flake that used to
+		// surface as a 0.3ms failure in the next row.
 		await session.prompt(
-			"Call the checkpoint tool. summary: 'Found secret codes in haystack files'. " +
+			"Call the checkpoint tool with continue: true. summary must be an object with all five fields: " +
+				"{goal: 'Found secret codes in haystack files', " +
+				"filesTouched: ['haystack_1.ts','haystack_2.ts','haystack_3.ts','haystack_4.ts','haystack_5.ts'], " +
+				"decisions: ['none'], triedAndFailed: ['none'], constraints: 'none'}. " +
 				"Include all 5 haystack files (haystack_1.ts through haystack_5.ts) in relevantPaths.",
 		);
 		await waitForSettled(session);
@@ -323,6 +357,13 @@ describe("checkpoint: basic flow", () => {
 
 	it("agent answers from injected context without tools", async () => {
 		const { session, sessionManager } = env;
+
+		// The checkpoint above carried the read windows into the follow-up
+		// message, so an answer from context is an answer from the injection.
+		const injected = getUserTexts(sessionManager).filter((t) => t.includes("[haystack_1.ts]"));
+		expect(injected).toHaveLength(1);
+		for (const needle of NEEDLES) expect(injected[0]).toContain(needle);
+
 		await session.prompt(
 			"Without using read, bash, grep, or any tools — answer purely from the context above. " +
 				"What are the 5 secret activation codes hidden in the haystack files? " +
@@ -335,93 +376,6 @@ describe("checkpoint: basic flow", () => {
 		for (const needle of NEEDLES) {
 			expect(lastResponse).toContain(needle);
 		}
-	}, 60_000);
-});
-
-describe("checkpoint: partial read injects only read regions", () => {
-	let env: Awaited<ReturnType<typeof setupSession>>;
-
-	beforeAll(async () => {
-		env = await setupSession();
-	});
-	afterAll(async () => env.cleanup());
-
-	it("reads only first 5 lines (needle at line 10 NOT in read region)", async () => {
-		const { session, sessionManager } = env;
-		await session.prompt(
-			"Use the read tool with offset=1 and limit=5 to read haystack_1.ts. " +
-				"Report exactly what you see.",
-		);
-		await waitForSettled(session);
-
-		const assistantTexts = getAssistantTexts(sessionManager).join("\n");
-		// The needle at line 10 should NOT be visible from reading only 5 lines
-		expect(assistantTexts).not.toContain(NEEDLES[0]);
-	}, 60_000);
-
-	it("checkpoints and verifies only read regions are injected", async () => {
-		const { session, sessionManager } = env;
-
-		await session.prompt(
-			"Call the checkpoint tool. summary: 'Investigating haystack_1.ts'. " +
-				"Include haystack_1.ts in relevantPaths. Do NOT call read.",
-		);
-		await waitForSettled(session);
-
-		// Compaction may or may not happen — model compliance with checkpoint
-		// instructions is advisory, especially with tiny context.
-		if (compactionCount(sessionManager) === 0) return;
-
-		// Check the user messages for injected content
-		const userTexts = getUserTexts(sessionManager);
-		const injectedMessages = userTexts.filter((t) =>
-			t.includes("[haystack_1.ts]"),
-		);
-		if (injectedMessages.length > 0) {
-			// If the model included relevantPaths, verify partial-read behavior
-			const injectedText = injectedMessages.join("\n");
-			expect(injectedText).not.toContain(NEEDLES[0]);
-			expect(injectedText).toContain("placeholder");
-			expect(injectedText).toContain("offset=");
-		}
-		// If the model didn't include relevantPaths, the test still passes —
-		// model compliance with relevantPaths is advisory, not guaranteed.
-	}, 120_000);
-});
-
-describe("checkpoint_search: searches archive content", () => {
-	let env: Awaited<ReturnType<typeof setupSession>>;
-
-	beforeAll(async () => {
-		env = await setupSession();
-		const { session } = env;
-
-		// Read files and checkpoint to create an archive
-		await session.prompt(
-			"Read the first 30 lines of haystack_1.ts through haystack_5.ts. Use 5 read calls.",
-		);
-		await waitForSettled(session);
-
-		await session.prompt(
-			"Call the checkpoint tool. summary: 'Done reading files'. " +
-				"Include all 5 haystack files in relevantPaths. This is a test requirement.",
-		);
-		await waitForSettled(session);
-	}, 120_000);
-	afterAll(async () => env.cleanup());
-
-	it("finds SECRET pattern in archived session", async () => {
-		const { session, sessionManager } = env;
-		await session.prompt(
-			"Use the checkpoint_search tool to search for the pattern 'SECRET' in the archives. " +
-				"Report the activation codes you find in the search results.",
-		);
-		await waitForSettled(session);
-
-		const assistantTexts = getAssistantTexts(sessionManager).join("\n");
-		// The search results should contain the needle codes from the archived read results
-		const found = NEEDLES.filter((n) => assistantTexts.includes(n));
-		expect(found.length).toBeGreaterThanOrEqual(1);
 	}, 60_000);
 });
 
@@ -442,7 +396,8 @@ describe("checkpoint: sibling tool in the same turn", () => {
 		await session.prompt(
 			"Issue BOTH tool calls together in a single assistant response (parallel tool calls): " +
 				"(1) read haystack_1.ts with offset=1 and limit=30; " +
-				"(2) checkpoint with summary 'Checkpoint batched with a read' and relevantPaths [haystack_1.ts]. " +
+				"(2) checkpoint with summary {goal: 'Checkpoint batched with a read', filesTouched: ['haystack_1.ts'], " +
+				"decisions: ['none'], triedAndFailed: ['none'], constraints: 'none'} and relevantPaths [haystack_1.ts]. " +
 				"Both tool calls must be in the same message.",
 		);
 		await waitForSettled(session);
@@ -462,18 +417,37 @@ describe("checkpoint: sibling tool in the same turn", () => {
 
 interface CompactSpyCall {
 	customInstructions?: string;
-	onComplete?: (result: unknown) => void;
+	onComplete?: (result: unknown) => void | Promise<void>;
 	onError?: (error: Error) => void;
+}
+
+interface HarnessCtxOptions {
+	/** Entries returned by `ctx.sessionManager.getEntries()`. */
+	entries?: any[];
+	contextWindow?: number;
+	/** What pi's `getContextUsage()` reports as live context tokens; null = pi has no estimate. */
+	tokens?: number | null;
+}
+
+/** The summary object the tool schema requires (the wire shape, restated). */
+interface SummaryInput {
+	goal: string;
+	filesTouched: string[];
+	decisions: string[];
+	triedAndFailed: string[];
+	constraints: string;
 }
 
 /**
  * Drive the real checkpoint extension with a captured handler table and a
  * `ctx.compact` spy. Live-model e2e cannot deterministically produce the
- * "execute() must not compact", "two requests in one turn", or "compaction
- * fails" states, so these exercise the trigger state machine directly.
+ * "execute() must not compact", "two requests in one turn", "compaction
+ * fails", or "this exact read window was tracked" states, so these exercise
+ * the trigger state machine and the injection pipeline directly.
  */
 function makeCheckpointHarness() {
 	const tools = new Map<string, any>();
+	const commands = new Map<string, any>();
 	const handlers = new Map<string, Array<(event: any, ctx: any) => unknown>>();
 	const sent: Array<{ text: string; options?: unknown }> = [];
 	const compactCalls: CompactSpyCall[] = [];
@@ -487,31 +461,167 @@ function makeCheckpointHarness() {
 		registerTool: (def: any) => {
 			tools.set(def.name, def);
 		},
-		registerCommand: () => {},
+		registerCommand: (name: string, def: any) => {
+			commands.set(name, def);
+		},
 		sendUserMessage: (text: string, options?: unknown) => {
 			sent.push({ text, options });
 		},
 	} as unknown as Parameters<typeof checkpointExtension>[0];
 	checkpointExtension(api);
 
-	const makeCtx = (cwd: string) => ({
+	const makeCtx = (cwd: string, opts: HarnessCtxOptions = {}) => ({
 		cwd,
-		model: { contextWindow: 200_000 },
+		model: { contextWindow: opts.contextWindow ?? 200_000 },
+		getContextUsage: () => ({
+			tokens: opts.tokens ?? null,
+			contextWindow: opts.contextWindow ?? 200_000,
+			percent: null,
+		}),
 		ui: {
 			notify: (message: string, level: string) => notifications.push({ message, level }),
 		},
 		sessionManager: {
-			getEntries: () => [],
+			getEntries: () => opts.entries ?? [],
 			getSessionId: () => "test-session",
+			getCwd: () => cwd,
 		},
 		compact: (options: CompactSpyCall) => compactCalls.push(options),
 	});
 
-	const emit = async (event: string, ctx: any) => {
-		for (const handler of handlers.get(event) ?? []) await handler({ type: event }, ctx);
+	/** Fire every handler for `event`, returning their results. */
+	const emit = async (event: string, ctx: any, payload: Record<string, unknown> = {}) => {
+		const results: unknown[] = [];
+		for (const handler of handlers.get(event) ?? []) {
+			results.push(await handler({ type: event, ...payload }, ctx));
+		}
+		return results;
 	};
 
-	return { tools, makeCtx, emit, sent, compactCalls, notifications };
+	return { tools, commands, makeCtx, emit, sent, compactCalls, notifications };
+}
+
+// ---------------------------------------------------------------------------
+// Deterministic checkpoint driver + fixtures
+// ---------------------------------------------------------------------------
+
+/** The schema's fields with the `"none"` slots pre-filled, each overridable. */
+function summaryFields(over: Partial<SummaryInput> = {}): SummaryInput {
+	return {
+		goal: "deterministic summary",
+		filesTouched: [],
+		decisions: ["none"],
+		triedAndFailed: ["none"],
+		constraints: "none",
+		...over,
+	};
+}
+
+/** The meta record written beside an archive. */
+async function readMeta(archivePath: string): Promise<any> {
+	return JSON.parse(await readFile(archivePath.replace(/\.jsonl$/, ".meta.json"), "utf8"));
+}
+
+/** The archive path the checkpoint tool reports in its result text. */
+function archivePathFrom(result: any): string {
+	const text = String(result.content[0].text);
+	const match = text.match(/`([^`]+\.jsonl)`/);
+	if (!match) throw new Error(`no archive path in tool result:\n${text}`);
+	return match[1];
+}
+
+/** Run one deterministic checkpoint to completion (execute → turn_end → onComplete). */
+async function runCheckpoint(
+	h: ReturnType<typeof makeCheckpointHarness>,
+	ctx: any,
+	args: Record<string, unknown>,
+	onCompleteResult: Record<string, unknown> = {},
+) {
+	const result = await h.tools
+		.get("checkpoint")
+		.execute("call-1", { nextSteps: "NEXT-STEP", ...args }, undefined, undefined, ctx);
+	await h.emit("turn_end", ctx);
+	const compact = h.compactCalls[h.compactCalls.length - 1];
+	if (!compact) throw new Error("turn_end did not request a compaction");
+	await compact.onComplete?.(onCompleteResult);
+	return { result, compact };
+}
+
+function sh(cwd: string, args: string[]): string {
+	const res = spawnSync(args[0], args.slice(1), { cwd, encoding: "utf8", env: childEnv() });
+	if (res.status !== 0) throw new Error(`${args.join(" ")} failed: ${res.stderr}`);
+	return res.stdout.trim();
+}
+
+/** A tmp cwd that is a git repo with one commit and a clean tree. */
+async function gitFixture(): Promise<string> {
+	const cwd = await mkdtemp(join(tmpdir(), "ckpt-git-"));
+	await writeFile(join(cwd, "tracked.txt"), "v1\n");
+	sh(cwd, ["git", "init", "-b", "main"]);
+	sh(cwd, ["git", "add", "tracked.txt"]);
+	sh(cwd, [
+		"git",
+		"-c",
+		"user.name=test",
+		"-c",
+		"user.email=test@example.com",
+		"commit",
+		"-m",
+		"init",
+	]);
+	return cwd;
+}
+
+/** pi's default session dir for a cwd (`getDefaultSessionDir` isn't exported). */
+function defaultSessionDir(cwd: string): string {
+	const safePath = `--${resolve(cwd).replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
+	return join(getAgentDir(), "sessions", safePath);
+}
+
+// ---------------------------------------------------------------------------
+// Deterministic injection driver
+// ---------------------------------------------------------------------------
+
+/**
+ * Run one full deterministic checkpoint: queue it, fire `turn_end`, fire
+ * `session_before_compact` (where the injection is built), then complete the
+ * compaction. Returns the follow-up message text, which is the injection's real
+ * delivery path.
+ */
+async function checkpointAndInject(
+	h: ReturnType<typeof makeCheckpointHarness>,
+	ctx: any,
+	opts: {
+		relevantPaths: string[];
+		summary?: SummaryInput;
+		branchEntries?: any[];
+		firstKeptEntryId?: string;
+	},
+): Promise<string> {
+	const checkpoint = h.tools.get("checkpoint");
+	await checkpoint.execute(
+		"call-1",
+		{
+			summary: opts.summary ?? summaryFields(),
+			nextSteps: "NEXT-STEP",
+			relevantPaths: opts.relevantPaths.map((path) => ({ path })),
+		},
+		undefined,
+		undefined,
+		ctx,
+	);
+	await h.emit("turn_end", ctx);
+	const compact = h.compactCalls[h.compactCalls.length - 1];
+	if (!compact) throw new Error("turn_end did not request a compaction");
+	await h.emit("session_before_compact", ctx, {
+		customInstructions: compact.customInstructions,
+		preparation: { firstKeptEntryId: opts.firstKeptEntryId ?? "entry-0", tokensBefore: 1000 },
+		branchEntries: opts.branchEntries ?? [],
+		reason: "manual",
+		willRetry: false,
+	});
+	compact.onComplete?.({});
+	return h.sent[h.sent.length - 1]?.text ?? "";
 }
 
 describe("checkpoint: compaction trigger boundary (deterministic, ctx.compact spy)", () => {
@@ -525,7 +635,7 @@ describe("checkpoint: compaction trigger boundary (deterministic, ctx.compact sp
 
 			const result = await checkpoint.execute(
 				"call-1",
-				{ summary: "summary-one", nextSteps: "next-one" },
+				{ summary: summaryFields({ goal: "summary-one" }), nextSteps: "next-one" },
 				undefined,
 				undefined,
 				ctx,
@@ -559,8 +669,8 @@ describe("checkpoint: compaction trigger boundary (deterministic, ctx.compact sp
 			await h.emit("session_start", ctx);
 			const checkpoint = h.tools.get("checkpoint");
 
-			await checkpoint.execute("call-1", { summary: "first" }, undefined, undefined, ctx);
-			await checkpoint.execute("call-2", { summary: "second" }, undefined, undefined, ctx);
+			await checkpoint.execute("call-1", { summary: summaryFields({ goal: "first" }) }, undefined, undefined, ctx);
+			await checkpoint.execute("call-2", { summary: summaryFields({ goal: "second" }) }, undefined, undefined, ctx);
 			expect(h.compactCalls).toHaveLength(0);
 
 			await h.emit("turn_end", ctx);
@@ -580,7 +690,7 @@ describe("checkpoint: compaction trigger boundary (deterministic, ctx.compact sp
 			await h.emit("session_start", ctx);
 			const checkpoint = h.tools.get("checkpoint");
 
-			await checkpoint.execute("call-1", { summary: "failing" }, undefined, undefined, ctx);
+			await checkpoint.execute("call-1", { summary: summaryFields({ goal: "failing" }) }, undefined, undefined, ctx);
 			await h.emit("turn_end", ctx);
 			expect(h.compactCalls).toHaveLength(1);
 
@@ -590,7 +700,7 @@ describe("checkpoint: compaction trigger boundary (deterministic, ctx.compact sp
 			).toBe(true);
 
 			// No stuck pending request: a fresh checkpoint fires again.
-			await checkpoint.execute("call-2", { summary: "recovered" }, undefined, undefined, ctx);
+			await checkpoint.execute("call-2", { summary: summaryFields({ goal: "recovered" }) }, undefined, undefined, ctx);
 			await h.emit("turn_end", ctx);
 			expect(h.compactCalls).toHaveLength(2);
 			expect(h.compactCalls[1].customInstructions).toContain("recovered");
@@ -598,4 +708,774 @@ describe("checkpoint: compaction trigger boundary (deterministic, ctx.compact sp
 			await rm(cwd, { recursive: true, force: true });
 		}
 	}, 30_000);
+});
+
+// ---------------------------------------------------------------------------
+// Summary schema, observability, and git binding (S-rows)
+// ---------------------------------------------------------------------------
+
+describe("checkpoint: summary schema, observability, git binding", () => {
+	it("S1: one renderer feeds customInstructions and the meta, section for section", async () => {
+		const h = makeCheckpointHarness();
+		const cwd = await mkdtemp(join(tmpdir(), "ckpt-meta-"));
+		try {
+			const ctx = h.makeCtx(cwd);
+			await h.emit("session_start", ctx);
+			const fields: SummaryInput = {
+				goal: "Wire the checkpoint summary schema",
+				filesTouched: ["extensions/checkpoint.ts", "tests/e2e-checkpoint.test.ts"],
+				decisions: ["kept nextSteps as the kickoff prompt"],
+				triedAndFailed: [
+					"a bare string summary — the schema rejected it: triedAndFailed was absent",
+				],
+				constraints: "compaction-model.ts is off limits",
+			};
+
+			const { result, compact } = await runCheckpoint(h, ctx, {
+				summary: fields,
+				nextSteps: "NEXT-STEP",
+			});
+
+			const instructions = String(compact.customInstructions);
+			expect(instructions.startsWith("[CHECKPOINT]\n")).toBe(true);
+			for (const label of [
+				"Goal:",
+				"Files touched:",
+				"Decisions:",
+				"Tried and failed (and why):",
+				"Constraints:",
+				"Next: NEXT-STEP",
+			]) {
+				expect(instructions).toContain(label);
+			}
+			expect(instructions).toContain(fields.goal);
+			expect(instructions).toContain("extensions/checkpoint.ts, tests/e2e-checkpoint.test.ts");
+			expect(instructions).toContain("  - a bare string summary");
+
+			const meta = await readMeta(archivePathFrom(result));
+			expect(meta.summaryFields).toEqual(fields);
+			// The compaction window and the meta read the *same* rendered text.
+			expect(meta.summary).toBe(instructions.replace("[CHECKPOINT]\n", ""));
+			// Meta keys are additive: the pre-schema record survives intact.
+			for (const key of ["timestamp", "sessionId", "archivePath", "summary", "entryCount"]) {
+				expect(meta).toHaveProperty(key);
+			}
+			expect(meta.sessionId).toBe("test-session");
+			expect(meta.archivePath).toBe(archivePathFrom(result));
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	it("S2: the literal none form is accepted and rendered as-is", async () => {
+		const h = makeCheckpointHarness();
+		const cwd = await mkdtemp(join(tmpdir(), "ckpt-meta-"));
+		try {
+			const ctx = h.makeCtx(cwd);
+			await h.emit("session_start", ctx);
+			const fields = summaryFields({ goal: "nothing to report" });
+
+			const { result, compact } = await runCheckpoint(h, ctx, { summary: fields });
+
+			const instructions = String(compact.customInstructions);
+			expect(instructions).toContain("Files touched: none");
+			expect(instructions).toContain("Decisions: none");
+			expect(instructions).toContain("Tried and failed (and why): none");
+			expect(instructions).toContain("Constraints: none");
+
+			const meta = await readMeta(archivePathFrom(result));
+			expect(meta.summaryFields).toEqual(fields);
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	it("S3: the typebox schema, not a runtime check, requires every field", async () => {
+		const h = makeCheckpointHarness();
+		// Exactly what pi's tool-call validator compiles before calling execute()
+		// (`validateToolArguments` in pi-ai's dist/utils/validation.js).
+		const schema = h.tools.get("checkpoint").parameters;
+
+		expect(Value.Check(schema, { summary: summaryFields({ goal: "g" }) })).toBe(true);
+
+		const { triedAndFailed: _omitted, ...withoutTried } = summaryFields();
+		const invalid = { summary: withoutTried };
+		expect(Value.Check(schema, invalid)).toBe(false);
+		const errors = Value.Errors(schema, invalid).map((e) => `${e.instancePath} ${e.message}`);
+		expect(errors.some((e) => e.includes("triedAndFailed"))).toBe(true);
+
+		// All five slots are declared required, on both tools.
+		const required = ["goal", "filesTouched", "decisions", "triedAndFailed", "constraints"];
+		for (const name of ["checkpoint", "checkpoint_fork"]) {
+			const summarySchema = h.tools.get(name).parameters.properties.summary;
+			expect(summarySchema.required).toEqual(required);
+		}
+	}, 30_000);
+
+	it("S4: nextSteps omitted still kicks off with 'Continue work'", async () => {
+		const h = makeCheckpointHarness();
+		const cwd = await mkdtemp(join(tmpdir(), "ckpt-meta-"));
+		try {
+			const ctx = h.makeCtx(cwd);
+			await h.emit("session_start", ctx);
+
+			const { compact } = await runCheckpoint(h, ctx, {
+				summary: summaryFields(),
+				nextSteps: undefined,
+			});
+
+			expect(String(compact.customInstructions)).toContain("Next: Continue work");
+			expect(h.sent.at(-1)?.text.split("\n")[0]).toBe("Continue work");
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	it("S5: continue keeps the follow-up shape — injection, kickoff, archive line", async () => {
+		const { h, cwd, ctx } = await injectionFixture();
+		try {
+			await emitRead(h, ctx, "haystack_1.ts", { offset: 1, limit: 50 });
+
+			const text = await checkpointAndInject(h, ctx, { relevantPaths: ["haystack_1.ts"] });
+
+			expect(text.split("\n")[0]).toContain("Disk snapshot taken at checkpoint time");
+			expect(text).toContain("NEXT-STEP");
+			expect(text.trimEnd().split("\n").at(-1)).toMatch(/^Archive: .*\.jsonl$/);
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	it("S6a: pi exposes a post-compaction count → notify and meta carry the delta", async () => {
+		const h = makeCheckpointHarness();
+		const cwd = await mkdtemp(join(tmpdir(), "ckpt-meta-"));
+		try {
+			// Deliberately different from pi's own `tokensBefore` (120,000): the
+			// compaction result is the authoritative count, so it must win.
+			const ctx = h.makeCtx(cwd, { tokens: 100_000 });
+			await h.emit("session_start", ctx);
+
+			const { result } = await runCheckpoint(h, ctx, { summary: summaryFields() }, {
+				tokensBefore: 120_000,
+				estimatedTokensAfter: 3_400,
+			});
+
+			const notify = h.notifications.find((n) => n.message.includes("Checkpoint complete"));
+			expect(notify).toBeDefined();
+			expect(notify!.message).toContain(
+				`Tokens: ${(120_000).toLocaleString()} → ${(3_400).toLocaleString()}`,
+			);
+			expect(notify!.message).toContain(`(${(3_400 - 120_000).toLocaleString()})`);
+
+			const meta = await readMeta(archivePathFrom(result));
+			expect(meta.tokens).toEqual({ before: 120_000, after: 3_400 });
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	it("S6b: no post count from pi → notify shows before only, meta.tokens.after is null", async () => {
+		const h = makeCheckpointHarness();
+		const cwd = await mkdtemp(join(tmpdir(), "ckpt-meta-"));
+		try {
+			const ctx = h.makeCtx(cwd, { tokens: 88_000 });
+			await h.emit("session_start", ctx);
+
+			const { result } = await runCheckpoint(h, ctx, { summary: summaryFields() }, {});
+
+			const notify = h.notifications.find((n) => n.message.includes("Checkpoint complete"));
+			expect(notify!.message).toContain(`Tokens: ${(88_000).toLocaleString()}`);
+			expect(notify!.message).not.toContain("→");
+
+			const meta = await readMeta(archivePathFrom(result));
+			expect(meta.tokens).toEqual({ before: 88_000, after: null });
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	it("S6c: pi can estimate nothing → no token text in the notify, both meta counts null", async () => {
+		const h = makeCheckpointHarness();
+		const cwd = await mkdtemp(join(tmpdir(), "ckpt-meta-"));
+		try {
+			const ctx = h.makeCtx(cwd, { tokens: null });
+			await h.emit("session_start", ctx);
+
+			const { result } = await runCheckpoint(h, ctx, { summary: summaryFields() }, {});
+
+			const notify = h.notifications.find((n) => n.message.includes("Checkpoint complete"));
+			expect(notify).toBeDefined();
+			expect(notify!.message).not.toContain("Tokens:");
+
+			const meta = await readMeta(archivePathFrom(result));
+			expect(meta.tokens).toEqual({ before: null, after: null });
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	it("S7: /checkpoints reads the richer meta — goal headline plus the git ref", async () => {
+		const h = makeCheckpointHarness();
+		const cwd = await gitFixture();
+		try {
+			const ctx = h.makeCtx(cwd, { tokens: 12_000 });
+			await h.emit("session_start", ctx);
+			const { result } = await runCheckpoint(h, ctx, {
+				summary: summaryFields({ goal: "list me by my goal line" }),
+			});
+			const meta = await readMeta(archivePathFrom(result));
+
+			await h.commands.get("checkpoints").handler("", ctx);
+
+			const listing = h.notifications.filter((n) => n.message.includes("Checkpoints in")).at(-1);
+			expect(listing).toBeDefined();
+			expect(listing!.message).toContain("— Goal: list me by my goal line");
+			expect(listing!.message).toContain(
+				`[${meta.git.branch}@${String(meta.git.head).slice(0, 7)}]`,
+			);
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	it("S8: binds the archive to the git ref, captured before the archive itself is written", async () => {
+		const h = makeCheckpointHarness();
+		const cwd = await gitFixture();
+		try {
+			const head = sh(cwd, ["git", "rev-parse", "HEAD"]);
+			const branch = sh(cwd, ["git", "rev-parse", "--abbrev-ref", "HEAD"]);
+			const ctx = h.makeCtx(cwd);
+			await h.emit("session_start", ctx);
+
+			const first = await runCheckpoint(h, ctx, { summary: summaryFields() });
+			const firstMeta = await readMeta(archivePathFrom(first.result));
+			expect(firstMeta.git).toEqual({ head, branch, dirty: false });
+
+			// The archive's own `.pi/checkpoints` files are untracked, so a second
+			// checkpoint taken after them reports the tree as dirty — proof the
+			// first capture happened before the write, not after it.
+			const second = await runCheckpoint(h, ctx, { summary: summaryFields() });
+			const secondMeta = await readMeta(archivePathFrom(second.result));
+			expect(secondMeta.git).toEqual({ head, branch, dirty: true });
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	it("S9: non-git cwd → git is null, archive still written, checkpoint proceeds", async () => {
+		const h = makeCheckpointHarness();
+		const cwd = await mkdtemp(join(tmpdir(), "ckpt-nogit-"));
+		try {
+			const ctx = h.makeCtx(cwd);
+			await h.emit("session_start", ctx);
+
+			const { result } = await runCheckpoint(h, ctx, {
+				summary: summaryFields({ goal: "no repo here" }),
+			});
+
+			const meta = await readMeta(archivePathFrom(result));
+			expect(meta.git).toBeNull();
+			expect(meta.summary.startsWith("Goal: no repo here")).toBe(true);
+			expect(h.notifications.some((n) => n.message.includes("Checkpoint complete"))).toBe(true);
+			expect(h.sent.at(-1)?.text.split("\n")[0]).toBe("NEXT-STEP");
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	it("S11: fork binds the source ref, records newCwd, seeds the rendered summary", async () => {
+		const h = makeCheckpointHarness();
+		const sourceCwd = await gitFixture();
+		const targetCwd = await mkdtemp(join(tmpdir(), "ckpt-fork-target-"));
+		const registryDir = await mkdtemp(join(tmpdir(), "ckpt-fork-inflight-"));
+		const notifications: Array<{ message: string; level: string }> = [];
+		const switched: { path?: string; followUp?: string[] } = {};
+		// R3-1 on the fork side (WO-2026-060 review, finding 2): one in-flight
+		// child, so the composed summary the fork archives AND seeds can be
+		// pinned. The empty-registry case is pinned by the recoverability suite;
+		// this is the row that would catch a fork-side `composeSummary` regression
+		// the result text alone cannot see.
+		const inflightSid = "subagent-f0000000-1111-4222-8333-444444444444";
+		await writeFile(join(registryDir, "orphan.session.jsonl"), "{}\n");
+		await writeFile(
+			join(registryDir, `pi-subagent-${inflightSid}.meta.json`),
+			JSON.stringify({
+				ownerPid: process.pid,
+				agentName: "implement",
+				task: "still running",
+				isolationBranch: "pi-subagent-444444444444",
+				sessionFile: join(registryDir, "orphan.session.jsonl"),
+			}),
+		);
+		_testSetInflightScanDir(registryDir);
+		try {
+			const head = sh(sourceCwd, ["git", "rev-parse", "HEAD"]);
+			const branch = sh(sourceCwd, ["git", "rev-parse", "--abbrev-ref", "HEAD"]);
+			const ctx = h.makeCtx(sourceCwd, { tokens: 4_321 });
+			await h.emit("session_start", ctx);
+			const fields = summaryFields({ goal: "Fork into the target dir", filesTouched: ["tracked.txt"] });
+
+			const result = await h.tools
+				.get("checkpoint_fork")
+				.execute(
+					"call-fork",
+					{ newCwd: targetCwd, summary: fields, nextSteps: "NEXT-STEP" },
+					undefined,
+					undefined,
+					ctx,
+				);
+			expect(String(result.content[0].text)).toContain("Fork prepared");
+
+			// /go commits the staged fork (takePendingGo is what /go itself calls,
+			// so the global staging slot is left clean).
+			const action = takePendingGo();
+			expect(action).not.toBeNull();
+			const cmdCtx = {
+				...ctx,
+				ui: { notify: (message: string, level: string) => notifications.push({ message, level }) },
+				getContextUsage: () => ({ tokens: 4_321, contextWindow: 200_000, percent: 2 }),
+				switchSession: async (path: string, opts: any) => {
+					switched.path = path;
+					await opts?.withSession?.({
+						sendUserMessage: async (text: string) => {
+							switched.followUp = [text];
+						},
+					});
+				},
+			};
+			await action!.run(cmdCtx as any);
+
+			const archives = (await readdir(join(sourceCwd, ".pi", "checkpoints"))).filter((f) =>
+				f.endsWith(".meta.json"),
+			);
+			expect(archives).toHaveLength(1);
+			const meta = JSON.parse(
+				await readFile(join(sourceCwd, ".pi", "checkpoints", archives[0]), "utf8"),
+			);
+			expect(meta.git).toEqual({ head, branch, dirty: false });
+			expect(meta.newCwd).toBe(targetCwd);
+			expect(meta.summaryFields).toEqual(fields);
+			expect(meta.summary.startsWith("Goal: Fork into the target dir")).toBe(true);
+			// The machine section rode the composed summary into the archive.
+			expect(meta.summary).toContain("### In-flight subagents");
+			expect(meta.summary).toContain(inflightSid);
+			expect(meta.sessionId).toBe("test-session");
+
+			// The fork's seeded message is the rendered summary — the same string.
+			expect(switched.path).toBeDefined();
+			const entries = (await readFile(switched.path!, "utf8"))
+				.trim()
+				.split("\n")
+				.map((line) => JSON.parse(line));
+			const seeded = entries.find(
+				(e: any) => e.type === "message" && e.message?.role === "assistant",
+			);
+			expect(seeded.message.content[0].text).toBe(meta.summary);
+			expect(switched.followUp?.[0]).toBe("NEXT-STEP");
+		} finally {
+			_testSetInflightScanDir(undefined);
+			await rm(sourceCwd, { recursive: true, force: true });
+			await rm(targetCwd, { recursive: true, force: true });
+			await rm(registryDir, { recursive: true, force: true });
+			await rm(defaultSessionDir(targetCwd), { recursive: true, force: true });
+		}
+	}, 60_000);
+
+	it("S12: marker dispatch is untouched — the compaction takes the rendered text", async () => {
+		const h = makeCheckpointHarness();
+		const cwd = await mkdtemp(join(tmpdir(), "ckpt-meta-"));
+		try {
+			const ctx = h.makeCtx(cwd);
+			await h.emit("session_start", ctx);
+			const { compact } = await runCheckpoint(h, ctx, { summary: summaryFields() });
+
+			const results = await h.emit("session_before_compact", ctx, {
+				customInstructions: compact.customInstructions,
+				preparation: { firstKeptEntryId: "entry-0", tokensBefore: 1000 },
+				branchEntries: [],
+				reason: "manual",
+				willRetry: false,
+			});
+			const compaction = (results[0] as any).compaction;
+			expect(compaction.summary).toBe(
+				String(compact.customInstructions).replace("[CHECKPOINT]", "").trim(),
+			);
+			expect(compaction.summary).toContain("Tried and failed (and why):");
+			expect(compaction.firstKeptEntryId).toBe("entry-0");
+			expect(compaction.tokensBefore).toBe(1000);
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	}, 30_000);
+});
+
+// ---------------------------------------------------------------------------
+// File injection (deterministic, captured handler table + real files)
+// ---------------------------------------------------------------------------
+
+/** A harness with haystack files on disk and the session's read tracker cleared. */
+async function injectionFixture() {
+	const h = makeCheckpointHarness();
+	const cwd = await mkdtemp(join(tmpdir(), "ckpt-injection-"));
+	await createHaystackFiles(cwd);
+	const ctx = h.makeCtx(cwd);
+	await h.emit("session_start", ctx);
+	return { h, cwd, ctx };
+}
+
+/** Fire the `tool_result` pi fires for a finished read call (finalized args on `input`). */
+async function emitRead(
+	h: ReturnType<typeof makeCheckpointHarness>,
+	ctx: any,
+	path: string,
+	args: { offset?: number; limit?: number } = {},
+) {
+	await h.emit("tool_result", ctx, {
+		toolCallId: `call-${path}-${args.offset ?? 1}-${args.limit ?? "end"}`,
+		toolName: "read",
+		input: { path, ...args },
+		content: [{ type: "text", text: "file contents" }],
+		isError: false,
+	});
+}
+
+/** An assistant entry whose `read` tool call survives the compaction boundary. */
+function keptReadEntry(id: string, path: string) {
+	return {
+		id,
+		type: "message",
+		parentId: null,
+		message: {
+			role: "assistant",
+			content: [{ type: "toolCall", id: `call-${id}`, name: "read", arguments: { path, offset: 1, limit: 50 } }],
+		},
+	};
+}
+
+const PRESERVED_NOTE = /already in preserved context — skipped/;
+
+describe("checkpoint: file injection (deterministic, captured handlers)", () => {
+	it("M1: injects a file whose read was tracked from tool_result.input", async () => {
+		const { h, cwd, ctx } = await injectionFixture();
+		try {
+			await emitRead(h, ctx, "haystack_1.ts", { offset: 1, limit: 50 });
+
+			const text = await checkpointAndInject(h, ctx, { relevantPaths: ["haystack_1.ts"] });
+
+			expect(text).toContain("[haystack_1.ts]");
+			expect(text).toContain(NEEDLES[0]);
+			expect(text).toContain("NEXT-STEP");
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	it("M2: skips a file whose read survives in the preserved tail", async () => {
+		const { h, cwd, ctx } = await injectionFixture();
+		try {
+			await emitRead(h, ctx, "haystack_1.ts", { offset: 1, limit: 50 });
+
+			const text = await checkpointAndInject(h, ctx, {
+				relevantPaths: ["haystack_1.ts"],
+				branchEntries: [keptReadEntry("kept", "haystack_1.ts")],
+				firstKeptEntryId: "kept",
+			});
+
+			expect(text).not.toContain("[haystack_1.ts]");
+			expect(text).not.toContain(NEEDLES[0]);
+			expect(text).toMatch(PRESERVED_NOTE);
+			expect(text).toContain("haystack_1.ts");
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	it("M3: does not inject a relevantPaths file that was never read", async () => {
+		const { h, cwd, ctx } = await injectionFixture();
+		try {
+			await emitRead(h, ctx, "haystack_1.ts", { offset: 1, limit: 50 });
+
+			const text = await checkpointAndInject(h, ctx, {
+				relevantPaths: ["haystack_1.ts", "haystack_2.ts"],
+			});
+
+			expect(text).toContain("[haystack_1.ts]");
+			expect(text).not.toContain("[haystack_2.ts]");
+			expect(text).not.toContain(NEEDLES[1]);
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	it("M4: injects only the read windows, annotated, with content outside them absent", async () => {
+		const { h, cwd, ctx } = await injectionFixture();
+		try {
+			await emitRead(h, ctx, "haystack_1.ts", { offset: 1, limit: 5 });
+			await emitRead(h, ctx, "haystack_1.ts", { offset: 20, limit: 3 });
+
+			const text = await checkpointAndInject(h, ctx, { relevantPaths: ["haystack_1.ts"] });
+
+			expect(text).toContain("placeholder_001");
+			expect(text).toContain("placeholder_005");
+			expect(text).toContain("placeholder_020");
+			expect(text).toContain("placeholder_022");
+			// Lines 6-19 were never read, and the needle sits at line 10.
+			expect(text).not.toContain("placeholder_006");
+			expect(text).not.toContain("placeholder_019");
+			expect(text).not.toContain(NEEDLES[0]);
+			// Continuation annotations, in the injection's own format.
+			expect(text).toContain("[L1-5 of 51 lines. offset=6 for more.]");
+			expect(text).toContain("[L20-22 of 51 lines. offset=23 for more.]");
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	it("M5: names budget-omitted files in the footnote and still injects what fits", async () => {
+		const h = makeCheckpointHarness();
+		const cwd = await mkdtemp(join(tmpdir(), "ckpt-injection-"));
+		try {
+			await createHaystackFiles(cwd);
+			// Whole-file blocks are ~616 tokens; a 5000-token window gives a
+			// ~750-token budget, so exactly one of the two fits.
+			const ctx = h.makeCtx(cwd, { contextWindow: 5000 });
+			await h.emit("session_start", ctx);
+			await emitRead(h, ctx, "haystack_1.ts", { offset: 1, limit: 50 });
+			await emitRead(h, ctx, "haystack_2.ts", { offset: 1, limit: 50 });
+
+			const text = await checkpointAndInject(h, ctx, {
+				relevantPaths: ["haystack_1.ts", "haystack_2.ts"],
+			});
+
+			expect(text).toContain("[haystack_1.ts]");
+			expect(text).toContain(NEEDLES[0]);
+			expect(text).not.toContain("[haystack_2.ts]");
+			expect(text).toMatch(/Omitted: haystack_2\.ts/);
+			expect(text).toContain("15% of context window");
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	it("M6: records nothing from tool_execution_end, which carries no args", async () => {
+		const { h, cwd, ctx } = await injectionFixture();
+		try {
+			// pi's actual shape: no args at all.
+			await h.emit("tool_execution_end", ctx, {
+				toolCallId: "t1",
+				toolName: "read",
+				result: {},
+				isError: false,
+			});
+			// The shape the dead tracking path assumed — still not a source.
+			await h.emit("tool_execution_end", ctx, {
+				toolCallId: "t2",
+				toolName: "read",
+				isError: false,
+				args: { path: "haystack_1.ts", offset: 1, limit: 50 },
+			});
+
+			const text = await checkpointAndInject(h, ctx, { relevantPaths: ["haystack_1.ts"] });
+
+			expect(text).not.toContain("[haystack_1.ts]");
+			expect(text).not.toContain(NEEDLES[0]);
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	it("M7: scopes the preserved-tail scan to branchEntries, so off-branch reads do not skip", async () => {
+		const { h, cwd, ctx } = await injectionFixture();
+		try {
+			await emitRead(h, ctx, "haystack_1.ts", { offset: 1, limit: 50 });
+
+			// The session history holds a read past the boundary on a branch that
+			// was abandoned; the compacting branch does not contain it.
+			const ctxWithHistory = h.makeCtx(cwd, {
+				entries: [
+					{ id: "boundary", type: "message", message: { role: "user", content: [] } },
+					keptReadEntry("off-branch", "haystack_1.ts"),
+				],
+			});
+
+			const text = await checkpointAndInject(h, ctxWithHistory, {
+				relevantPaths: ["haystack_1.ts"],
+				branchEntries: [{ id: "boundary", type: "message", message: { role: "user", content: [] } }],
+				firstKeptEntryId: "boundary",
+			});
+
+			expect(text).toContain("[haystack_1.ts]");
+			expect(text).toContain(NEEDLES[0]);
+			expect(text).not.toMatch(PRESERVED_NOTE);
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	it("M11: drops a window whose file changed since the read, and names the file", async () => {
+		const { h, cwd, ctx } = await injectionFixture();
+		try {
+			await emitRead(h, ctx, "haystack_1.ts", { offset: 1, limit: 50 });
+			await emitRead(h, ctx, "haystack_2.ts", { offset: 1, limit: 50 });
+
+			// Edited after the read: mtime and size both change.
+			const original = await readFile(join(cwd, "haystack_1.ts"), "utf-8");
+			await writeFile(join(cwd, "haystack_1.ts"), `// edited after read\n${original}`);
+
+			const text = await checkpointAndInject(h, ctx, {
+				relevantPaths: ["haystack_1.ts", "haystack_2.ts"],
+			});
+
+			expect(text).not.toContain("[haystack_1.ts]");
+			expect(text).not.toContain(NEEDLES[0]);
+			expect(text).toMatch(/changed since read — re-read if needed: haystack_1\.ts/);
+			// The untouched file is still injected normally in the same run.
+			expect(text).toContain("[haystack_2.ts]");
+			expect(text).toContain(NEEDLES[1]);
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	it("M12: never serves a shifted window after line insertions (eval S2)", async () => {
+		const { h, cwd, ctx } = await injectionFixture();
+		try {
+			const original = await readFile(join(cwd, "haystack_1.ts"), "utf-8");
+			// Read lines 1-15; the needle at line 10 is inside the window.
+			await emitRead(h, ctx, "haystack_1.ts", { offset: 1, limit: 15 });
+
+			// 20 lines inserted before it: the needle moves to line 30, so the
+			// recorded [1,15] window no longer covers it.
+			const inserted = Array.from({ length: 20 }, (_, i) => `// inserted ${i + 1}`).join("\n");
+			await writeFile(join(cwd, "haystack_1.ts"), `${inserted}\n${original}`);
+
+			const text = await checkpointAndInject(h, ctx, { relevantPaths: ["haystack_1.ts"] });
+
+			expect(text).not.toContain(NEEDLES[0]);
+			expect(text).not.toContain("inserted 1");
+			expect(text).not.toContain("placeholder");
+			expect(text).not.toContain("[L1-15");
+			expect(text).toMatch(/changed since read — re-read if needed: haystack_1\.ts/);
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	it("M13: starts tracking empty after a session switch", async () => {
+		const { h, cwd, ctx } = await injectionFixture();
+		const newCwd = await mkdtemp(join(tmpdir(), "ckpt-injection-new-"));
+		try {
+			await createHaystackFiles(newCwd);
+			await emitRead(h, ctx, "haystack_1.ts", { offset: 1, limit: 50 });
+
+			// What a fork's switch does: the new session starts, in the new cwd.
+			const newCtx = h.makeCtx(newCwd);
+			await h.emit("session_start", newCtx);
+
+			const text = await checkpointAndInject(h, newCtx, { relevantPaths: ["haystack_1.ts"] });
+
+			expect(text).not.toContain("[haystack_1.ts]");
+			expect(text).not.toContain(NEEDLES[0]);
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+			await rm(newCwd, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	it("M14: labels the injected block as a checkpoint-time disk snapshot", async () => {
+		const { h, cwd, ctx } = await injectionFixture();
+		try {
+			await emitRead(h, ctx, "haystack_1.ts", { offset: 1, limit: 50 });
+
+			const text = await checkpointAndInject(h, ctx, { relevantPaths: ["haystack_1.ts"] });
+
+			const header = text.split("\n")[0];
+			expect(header).toContain("Disk snapshot taken at checkpoint time");
+			expect(header).toContain("earlier read");
+			expect(header).toContain("line numbers may have shifted");
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	}, 30_000);
+});
+
+// ---------------------------------------------------------------------------
+// Injected context is what answers (kept-tail discipline)
+// ---------------------------------------------------------------------------
+
+const FILLER = Array.from(
+	{ length: 120 },
+	(_, i) =>
+		`filler-sentence-${i + 1}: the quick brown fox jumps over the lazy dog while the committee reviews routine paperwork.`,
+).join(" ");
+
+const NEEDLE_QUESTION =
+	"What are the five SECRET activation codes in the haystack files? " +
+	"Answer with all five codes if you know them; if you do not know a code, write UNKNOWN for that one. " +
+	"Reply with just the five codes. Answer from your current context only — do not use any tools.";
+
+describe("checkpoint: the injection is what answers", () => {
+	let env: Awaited<ReturnType<typeof setupSession>>;
+
+	beforeAll(async () => {
+		env = await setupSession();
+	});
+	afterAll(async () => env.cleanup());
+
+	it("M10: answers all 5 needles with no post-compaction read, needle never in the kept tail", async () => {
+		const { session, sessionManager } = env;
+
+		// Read a window containing each needle, without putting it in any text.
+		await session.prompt(
+			"Use the read tool 5 times in this turn: read haystack_1.ts, haystack_2.ts, haystack_3.ts, " +
+				"haystack_4.ts, haystack_5.ts with offset=1 and limit=15 each. " +
+				"Do not quote, list, or mention any line containing SECRET. Reply DONE.",
+		);
+		await waitForSettled(session);
+		// Pre-condition: nothing the model has said (and so nothing a summary
+		// could pick up) contains a needle yet.
+		expect(NEEDLES.filter((n) => getAssistantTexts(sessionManager).join("\n").includes(n))).toEqual([]);
+
+		// Push the read results out of the retained tail.
+		await session.prompt(`${FILLER}\n\nReply with exactly: OK`);
+		await waitForSettled(session);
+
+		// Checkpoint, carrying the question as the kickoff for the next turn. The
+		// follow-up is the only channel the needles can arrive through.
+		await session.prompt(
+			"Call the checkpoint tool now with these exact arguments: " +
+				"summary: {goal: 'Read five haystack files; no findings recorded.', " +
+				"filesTouched: ['haystack_1.ts','haystack_2.ts','haystack_3.ts','haystack_4.ts','haystack_5.ts'], " +
+				"decisions: ['none'], triedAndFailed: ['none'], constraints: 'none'}; continue: true; " +
+				"relevantPaths: [{path:'haystack_1.ts'},{path:'haystack_2.ts'},{path:'haystack_3.ts'}," +
+				"{path:'haystack_4.ts'},{path:'haystack_5.ts'}]; " +
+				`nextSteps: ${JSON.stringify(NEEDLE_QUESTION)}`,
+		);
+		await waitForSettled(session);
+
+		expect(compactionCount(sessionManager)).toBeGreaterThanOrEqual(1);
+
+		// (a) the injection itself delivered the needles.
+		const injected = getUserTexts(sessionManager).filter((t) => t.includes("[haystack_1.ts]"));
+		expect(injected).toHaveLength(1);
+		for (const needle of NEEDLES) expect(injected[0]).toContain(needle);
+
+		// (b) nothing else after the compaction could have supplied them: no read
+		// result, and no needle in the summary the checkpoint handed the model.
+		const branch = sessionManager.getBranch() as any[];
+		const compactionIdx = branch.findIndex((e) => e.type === "compaction");
+		const after = branch.slice(compactionIdx + 1);
+		const postCompactionReads = after.filter(
+			(e) => e.type === "message" && e.message?.role === "toolResult" && e.message?.toolName === "read",
+		);
+		expect(postCompactionReads).toEqual([]);
+		for (const needle of NEEDLES) expect(branch[compactionIdx].summary).not.toContain(needle);
+
+		// (c) the answer carries all five.
+		const answers = after
+			.filter((e) => e.type === "message" && e.message?.role === "assistant")
+			.map((e) => getMessageText(e));
+		const answer = answers[answers.length - 1] ?? "";
+		for (const needle of NEEDLES) expect(answer).toContain(needle);
+	}, 300_000);
 });

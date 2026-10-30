@@ -1,7 +1,7 @@
 ---
 name: review-tests
 description: Post-implementation adversarial test-coverage reviewer. Owns behavioral, failure, boundary, regression, and recovery-path test-coverage matrix adequacy. Does NOT review implementation correctness — that's `review-code`'s job. NOT for plan review (`review-plan`), implementation (`implement`), or research (`scout-code`).
-model: xiaomi/mimo-v2.6-flash:high
+model: opencode-go/deepseek-v4.1-flash:high
 reviewer_kind: tests
 requires_parent_reviewers:
 tools: read, grep, find, ls, bash
@@ -146,6 +146,10 @@ Categories (adapt to what the work order actually asks for):
   the test code.
 - A single happy-path test for a multi-case spec.
 
+**Duplicate coverage** — a new test that pins the same input class
+and assertion as an existing one adds maintenance, not evidence. Name
+the existing test; LOW, unless the new one pins a distinct regression.
+
 If you find yourself writing "tests pass" without citing a
 specific test file/line that exercises a specific case, you have
 not reviewed that case.
@@ -193,6 +197,36 @@ check; you own the targeted test coverage audit).
 Any CRITICAL or HIGH → REJECT_AND_REWORK. MEDIUM with no
 mitigation → REJECT_AND_REWORK. Only LOW (or MEDIUM with
 mitigation) → APPROVED_WITH_NOTES. Zero issues → APPROVED.
+
+### Approval bar (decision 033)
+
+APPROVED_WITH_NOTES means every note is LOW, or MEDIUM with a named
+mitigation.
+
+- **Mitigation is an artifact or a ruling.** A test, pinned `| nyi` row,
+  or guard in the tree, or an acceptance quoted from the work order or an
+  owner ruling. A disclosed gap, a fix-later suggestion, or "above my
+  scope" is not mitigation. Name each MEDIUM's mitigation in the rationale.
+- **A deviation the work order does not authorize is at least MEDIUM** —
+  unimplemented matrix rows, narrowed scope, extra residual gates — however
+  well disclosed. Judge against the work order's text, not the report's.
+- **A finding that needs an owner ruling — or the orchestrator's, on
+  scope or sequencing only — is REJECT_AND_REWORK**, with the question in the rework instructions. Never
+  approve past your own escalation.
+- **A claim the verdict rests on must be verified.** Unverifiable (a
+  re-verified regression, a "no other site" negative) → unmitigated MEDIUM;
+  say what evidence would settle it. A negative claim needs its
+  enumeration shown.
+- **Re-baselining an expectation to accept a known regression is HIGH**
+  unless the work order authorizes it.
+- **Read the work order itself** — its Task Summary, rejected
+  alternatives and acceptance rows. A brief's or report's account of it
+  is not the work order.
+- **A mechanism the work order rejects or does not prescribe needs an
+  owner ruling → REJECT_AND_REWORK**, however well justified, even when
+  the brief asks you to judge it. Do not rule on it.
+- **A retained path that gives a known wrong value is HIGH** when it is
+  in the bug class the work order targets, pre-existing or not.
 
 ## Output
 
@@ -251,13 +285,7 @@ convention? If the project has no such convention, say so.>
 
 ### Re-review required
 
-<yes | no — based on fix complexity, not severity. Answer: "After
-the implementer fixes this, do I need to verify the fix again?"
-- **yes**: fix involves new test logic, multiple interacting test
-  cases, or room for subtle mistakes in assertions
-- **no**: fix is mechanical (add missing test, update constant),
-  localized, or the kind of change that's obviously correct once
-  described>
+<yes | no — see Re-review decision>
 
 ### Rework instructions (REJECT_AND_REWORK only)
 
@@ -295,8 +323,9 @@ Set `re_review_required` based on fix complexity, not severity:
    are findings, not style notes.
 6. Don't write or fix tests — review and report only.
 7. Time-box: more than 15 files or 25 tool calls = over-reviewing.
-   Converge.
-7. Do not duplicate review-code's full-suite build check; run only
+   Converge by reporting what you could not check as blocking (see
+   Approval bar), never by dropping it.
+8. Do not duplicate review-code's full-suite build check; run only
    the targeted tests needed to confirm a coverage claim.
 
 ## Failure modes
@@ -308,5 +337,5 @@ Set `re_review_required` based on fix complexity, not severity:
    reading the tests. Read them.
 3. **Boundary drift** — accepting internal-helper tests as
    evidence for public-API behavior. They aren't.
-4. **Citation rot** — every Critical/Warning needs `file:line`
-   the implementer can open.
+4. **Citation rot** — every finding needs a `file:line` the
+   implementer can open.

@@ -217,6 +217,7 @@ function createPiStub() {
 
 const KILL_MARKER = "[Killed via subagent_kill — process terminated, work in this subagent is lost]";
 const PROGRESS_MARKER = "[Killed via progress-timeout — process terminated, work in this subagent is lost]";
+const TURN_LIMIT_MARKER = "[Killed via turn-limit — process terminated, work in this subagent is lost]";
 
 // ── Dispatch-level tests ───────────────────────────────────────────────────
 
@@ -355,6 +356,35 @@ describe("dispatchKillSignals (WO-2026-043 null-proc guard)", () => {
 			expect(obs).toMatch(/:(true):(kill-tool)$/);
 		}
 	});
+
+	// Hard-turn-limit kill (pi-config gh #8): the MAX_TURNS_HARD stop in the
+	// message_end handler must route through the shared kill dispatch so the
+	// close handler sees killedExplicitly and prepends the marker — a bare
+	// proc.kill there delivered the child's last message as a normal
+	// completion, escaping the killed/stopped skips (R4 owner_asks gate).
+	it("10: turn-limit via, live proc — SIGTERM dispatched, flags set, turn-limit label", () => {
+		const proc = stubLiveProc();
+		const rs = stubRunningSubagent(proc);
+
+		const result = dispatchKillSignals(rs, "turn-limit");
+
+		expect(result.alreadyDead).toBe(false);
+		expect(rs.killedExplicitly).toBe(true);
+		expect(rs.killedVia).toBe("turn-limit");
+		expect(proc.signals).toEqual(["SIGTERM"]);
+		const log = rs.logLines.join("\n");
+		expect(log).toContain("Killed via turn-limit (SIGTERM sent");
+	});
+
+	it("11: turn-limit via, null proc — flags set, no signal, noProcess guard", () => {
+		const rs = stubRunningSubagent(null);
+
+		const result = dispatchKillSignals(rs, "turn-limit");
+
+		expect(result).toEqual({ alreadyDead: true, noProcess: true });
+		expect(rs.killedExplicitly).toBe(true);
+		expect(rs.killedVia).toBe("turn-limit");
+	});
 });
 
 // ── Close-handler delivery decision ────────────────────────────────────────
@@ -401,6 +431,16 @@ describe("deliverCloseResult (single owner of delivery)", () => {
 		expect(path2).toBe("deliver");
 		expect(sent2.length).toBe(1);
 		expect(sent2[0]!.startsWith(PROGRESS_MARKER)).toBe(true);
+
+		// turn-limit via (gh #8 rework, review-tests r1 #1): the delivered
+		// marker family gains its own greppable variant — pin the string.
+		const sent3: string[] = [];
+		const rs3 = stubRunningSubagent(null);
+		dispatchKillSignals(rs3, "turn-limit");
+		const path3 = deliverCloseResult({ sendUserMessage: (m: string) => sent3.push(m) } as any, rs3, 0, "");
+		expect(path3).toBe("deliver");
+		expect(sent3.length).toBe(1);
+		expect(sent3[0]!.startsWith(TURN_LIMIT_MARKER)).toBe(true);
 	});
 });
 

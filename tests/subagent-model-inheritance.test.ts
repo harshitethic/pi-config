@@ -1,3 +1,9 @@
+// LIVE-NETWORK: this file makes real billed LLM calls on every full `bun test` run.
+// Provider/model: openrouter/xiaomi/mimo-v2.6-flash — the real `pi` binary on an unpinned
+// orchestrator seat, fixed ~13.9k system prompt / ~12 output tokens per spawn.
+// Invisible to session-log attribution: `afterEach` deletes the child transcripts.
+// See docs/investigations/or-workspace-attribution-2026-10.md.
+
 /**
  * Decision 031: the orchestrator seat always runs on its caller's model —
  * caller's `provider/id` at the seat's own thinking level — while every other
@@ -32,10 +38,10 @@ import subagentFactory, {
 	readMetaJson,
 	resolveChildModel,
 } from "../extensions/subagent-async/index.ts";
-import { FLEET_MODEL } from "../extensions/lib/fleet-model.ts";
+import { childEnv, scrubSubagentEnv } from "./helpers/subagent-env.ts";
 
 // What agents/orchestrator.md pins (the seat's own audited level, decision 022).
-const ORCHESTRATOR_SEAT = "deepseek/deepseek-v4.1-flash:max";
+const ORCHESTRATOR_SEAT = "opencode-go/deepseek-v4.1-flash:max";
 // A caller that is deliberately NOT on the seat's model — that is the whole
 // point of the rule; on today's single-slug fleet this is the no-op case.
 const OTHER_CALLER = "openrouter/xiaomi/mimo-v2.6-flash";
@@ -66,7 +72,7 @@ describe("resolveChildModel — the orchestrator seat tracks its caller", () => 
 		expect(
 			resolveChildModel({
 				agentName: "orchestrator",
-				agentModel: "deepseek/deepseek-v4.1-flash",
+				agentModel: "opencode-go/deepseek-v4.1-flash",
 				parentModel: OTHER_CALLER,
 			}),
 		).toBe(OTHER_CALLER);
@@ -78,7 +84,7 @@ describe("resolveChildModel — the orchestrator seat tracks its caller", () => 
 		expect(
 			resolveChildModel({
 				agentName: "orchestrator",
-				agentModel: "openrouter/deepseek/deepseek-v4.1-flash:free",
+				agentModel: "openrouter/deepseek/deepseek-v4.1-flash-1017:free",
 				parentModel: OTHER_CALLER,
 			}),
 		).toBe(OTHER_CALLER);
@@ -104,7 +110,7 @@ describe("resolveChildModel — the orchestrator seat tracks its caller", () => 
 		).toBe(ORCHESTRATOR_SEAT);
 		expect(
 			resolveChildModel({ agentName: "orchestrator", agentModel: undefined, parentModel: undefined }),
-		).toBe(FLEET_MODEL);
+		).toBe("opencode-go/deepseek-v4.1-flash");
 	});
 });
 
@@ -113,17 +119,17 @@ describe("resolveChildModel — every other seat keeps the existing rule", () =>
 		expect(
 			resolveChildModel({
 				agentName: "implement",
-				agentModel: "deepseek/deepseek-v4.1-flash:high",
+				agentModel: "opencode-go/deepseek-v4.1-flash:high",
 				parentModel: OTHER_CALLER,
 			}),
-		).toBe("deepseek/deepseek-v4.1-flash:high");
+		).toBe("opencode-go/deepseek-v4.1-flash:high");
 	});
 
 	it("passes the caller's model through unsubstituted when the spawn opts in (decision 020)", () => {
 		expect(
 			resolveChildModel({
 				agentName: "implement",
-				agentModel: "deepseek/deepseek-v4.1-flash:high",
+				agentModel: "opencode-go/deepseek-v4.1-flash:high",
 				parentModel: OTHER_CALLER,
 				inheritParentModel: true,
 			}),
@@ -140,7 +146,7 @@ describe("resolveChildModel — every other seat keeps the existing rule", () =>
 
 	it("falls back to the fleet model when the seat pins no model (decision 022)", () => {
 		expect(resolveChildModel({ agentName: "scout-code", agentModel: undefined, parentModel: OTHER_CALLER })).toBe(
-			FLEET_MODEL,
+			"opencode-go/deepseek-v4.1-flash",
 		);
 	});
 
@@ -159,7 +165,9 @@ describe("resolveChildModel — every other seat keeps the existing rule", () =>
 	});
 
 	it("falls back to the fleet model on resume when an old meta recorded none", () => {
-		expect(resolveChildModel({ agentName: "implement", agentModel: undefined, isResume: true })).toBe(FLEET_MODEL);
+		expect(resolveChildModel({ agentName: "implement", agentModel: undefined, isResume: true })).toBe(
+			"opencode-go/deepseek-v4.1-flash",
+		);
 	});
 });
 
@@ -177,12 +185,19 @@ function resolvePiEntry(): string {
 }
 
 let savedArgv1: string | undefined;
+// The rows spawn `orchestrator`/`implement` through the tool gate, whose
+// allowlist and nesting-cap reads are env-driven — that sensitivity is the
+// feature under test, so this file runs the gate on a controlled env of its own
+// rather than on whatever its runner inherited (pi-config#9).
+let restoreSubagentEnv: () => void = () => {};
 beforeAll(() => {
+	restoreSubagentEnv = scrubSubagentEnv();
 	savedArgv1 = process.argv[1];
 	process.argv[1] = resolvePiEntry();
 });
 afterAll(() => {
 	if (savedArgv1 !== undefined) process.argv[1] = savedArgv1;
+	restoreSubagentEnv();
 });
 
 function createPiStub() {
@@ -293,7 +308,7 @@ async function waitFor<T>(read: () => T | undefined | Promise<T | undefined>, ms
 function argvModelOf(sid: string): string | undefined {
 	let out: string;
 	try {
-		out = execFileSync("ps", ["-eww", "-o", "command="], { encoding: "utf8" });
+		out = execFileSync("ps", ["-eww", "-o", "command="], { env: childEnv(), encoding: "utf8" });
 	} catch {
 		return undefined;
 	}
@@ -384,9 +399,9 @@ describe("subagent tool boundary — the resolved model really is what runs", ()
 		async () => {
 			const child = await spawnChild("implement", { provider: "openrouter", id: "xiaomi/mimo-v2.6-flash" });
 
-			expect((readMetaJson(child.sid) as any)?.model).toBe("deepseek/deepseek-v4.1-flash:high");
-			expect(argvModelOf(child.sid), diagnose(child, "argv --model: expected deepseek/deepseek-v4.1-flash:high")).toBe(
-				"deepseek/deepseek-v4.1-flash:high",
+			expect((readMetaJson(child.sid) as any)?.model).toBe("opencode-go/deepseek-v4.1-flash:high");
+			expect(argvModelOf(child.sid), diagnose(child, "argv --model: expected opencode-go/deepseek-v4.1-flash:high")).toBe(
+				"opencode-go/deepseek-v4.1-flash:high",
 			);
 		},
 		120_000,
@@ -406,7 +421,7 @@ describe("subagent tool boundary — the resolved model really is what runs", ()
 			expect(modelsBefore).toContain("xiaomi/mimo-v2.6-flash");
 
 			// Resume from a session whose active model is a different one entirely.
-			const resumedCtx = createCtxStub(process.cwd(), { provider: "openrouter", id: "deepseek/deepseek-v4.1-flash" });
+			const resumedCtx = createCtxStub(process.cwd(), { provider: "openrouter", id: "deepseek/deepseek-v4.1-flash-1017" });
 			const res = await child.tools
 				.get("subagent_resume")
 				.execute("tr", { session_id: child.sid, task: "Reply with the single word: ok" }, undefined, undefined, resumedCtx);

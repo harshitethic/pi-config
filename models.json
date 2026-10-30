@@ -2,19 +2,33 @@
   "providers": {
     "openrouter": {
       "modelOverrides": {
-        "deepseek/deepseek-v4.1-flash": {
+        "deepseek/deepseek-v4.1-flash-1017": {
           "compat": {
             "openRouterRouting": {
-              "only": ["deepseek"],
+              "only": [
+                "deepseek"
+              ],
               "allow_fallbacks": false
             }
           }
         },
-        "xiaomi/mimo-v2.6-flash": {
+        "z-ai/glm-5.3-flash": {
           "compat": {
             "openRouterRouting": {
-              "only": ["Xiaomi"],
+              "only": [
+                "z-ai"
+              ],
               "allow_fallbacks": false
+            }
+          }
+        },
+        "xiaomi/mimo-v2.6-pro": {
+          "compat": {
+            "openRouterRouting": {
+              "order": [
+                "xiaomi"
+              ],
+              "allow_fallbacks": true
             }
           }
         }

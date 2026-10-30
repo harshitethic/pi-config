@@ -30,7 +30,7 @@ date: 2026-07-14
 | 021 | Effort rebalance — flash :high, glm-5.3 :max, low banned | done (levels survive on v4.1-flash; GLM basis superseded by 022) |
 | 022 | OpenRouter-only fleet on deepseek/deepseek-v4.1-flash — /fleet-model toggle deleted, oracle off 0813 | done |
 | 023 | Experiment: MiMo V2.6 Flash as the decorrelated reviewer tier (code/plan/tests) | experiment |
-| 024 | Structural growth checks — reviewers report growth; chunk-boundary audit in `structure-trend.md` | done (audit convention relocated to `APPEND_SYSTEM.md`, 2026-10-06) |
+| 024 | Structural growth checks — reviewers report growth; chunk-boundary audit in `structure-trend.md` | done (audit convention relocated to `APPEND_SYSTEM.md`, 2026-10-06; severity and closure superseded by 040) |
 | 025 | Global append prompt for subagents — inject shared `APPEND_SYSTEM.md` explicitly | done |
 | 026 | Subagent events after session disposal — guard async callbacks with a live-session ctx | done |
 | 027 | Recovery scan ownership — adopt a subagent socket only when its spawning process is this process or is gone | done |
@@ -39,3 +39,15 @@ date: 2026-07-14
 | 030 | Resume pre-check for a missing stored cwd (upstream ask recorded, unfiled) | done |
 | 031 | The orchestrator seat always runs on its caller's model (caller `provider/id` + the seat's level) | done |
 | 032 | Work-order `review_policy` grammar — dash-optional bold line, one shared resolver, mirror synced | done |
+| 033 | Reviewer approval bar (mitigation defined) + parallel-mechanism, decision-placement and duplicate-coverage checks | active |
+| 034 | Spec authority — only the owner changes a work order's mechanism, rejected alternatives or acceptance rows; a falsified premise stops the run | active |
+| 035 | Fleet model id → `deepseek/deepseek-v4.1-flash-1017` (Oct 17 checkpoint; pin + store hand-merge) | done |
+| 036 | DeepSeek fleet rides the OpenCode Go plan quota (`opencode-go/deepseek-v4.1-flash`; V4 Pro-style $15 buckets avoided) | done |
+| 037 | Reviewers → `opencode-go/glm-5.3-flash:high` (023 experiment superseded); oracle → `opencode-go/deepseek-v4-pro:max` | done |
+| 038 | Main session → `opencode-go/glm-5.3-flash` (meter-driven); multi-session orchestrator split | done |
+| 039 | Gates run the suite once (supersedes the ×2 convention) | done |
+| 040 | Refactor first: a preparatory refactor per work order, `REFACTOR FIRST` refusals, two-strikes area closure (owner only overrides) | done |
+| 041 | Review seats → `openrouter/z-ai/glm-5.3-flash:high` (off OpenCode Go extra-usage billing; model unchanged) — **suspended 2026-10-28 by 044** | done |
+| 042 | OpenCode Go is a coupon: fill it with DeepSeek fleet traffic only; `xiaomi/mimo-v2.6-pro` routing preference pin | done |
+| 043 | Owner state by row id (`owner_asks` gate, `nextSteps` bar) + checkpoint recoverability (in-flight record, worktree lock/reap, four-state status) | done |
+| 044 | Review seats → `opencode-go/deepseek-v4.1-flash:high` (OpenRouter credits exhausted; 041 suspended, decorrelation loss named) | done |
